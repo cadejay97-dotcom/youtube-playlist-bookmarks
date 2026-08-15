@@ -31,7 +31,7 @@ test("creates project list, GitHub List, and repository bookmark hierarchy", asy
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({
     ok: true,
-    json: async () => ({ data: { viewer: { login: "octocat", lists: { nodes: [{ id: "UL_1", name: "Lark AI Native", slug: "lark-ai-native", items: { nodes: [{ id: "R_1", nameWithOwner: "acme/project", url: "https://github.com/acme/project" }] } }] } } } })
+    json: async () => ({ data: { viewer: { login: "octocat", lists: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ id: "UL_1", name: "Lark AI Native", slug: "lark-ai-native", items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ id: "R_1", nameWithOwner: "acme/project", url: "https://github.com/acme/project" }] } }] } } } })
   });
   try {
     const result = await syncGitHubLists();

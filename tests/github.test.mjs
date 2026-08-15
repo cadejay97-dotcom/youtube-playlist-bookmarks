@@ -8,13 +8,14 @@ const graphQlPayload = {
     viewer: {
       login: "octocat",
       lists: {
+        pageInfo: { hasNextPage: false, endCursor: null },
         nodes: [{
           id: "UL_1",
           name: "AI projects",
           slug: "ai-projects",
           description: "Useful repositories",
           isPrivate: false,
-          items: { nodes: [{ id: "R_1", nameWithOwner: "openai/openai-node", url: "https://github.com/openai/openai-node", description: "Node SDK" }] }
+          items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ id: "R_1", nameWithOwner: "openai/openai-node", url: "https://github.com/openai/openai-node", description: "Node SDK" }] }
         }]
       }
     }
@@ -43,6 +44,16 @@ test("calls the official GraphQL endpoint with the GitHub bearer token", async (
   assert.equal(request.options.headers.Authorization, "Bearer token-123");
   assert.match(JSON.parse(request.options.body).query, /viewer\s*\{/);
   assert.equal(result.lists.length, 1);
+});
+
+test("paginates through repository bookmarks in a GitHub List", async () => {
+  const pages = [{
+    data: { viewer: { login: "octocat", lists: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ id: "UL_1", name: "AI projects", slug: "ai-projects", description: "", isPrivate: false, items: { pageInfo: { hasNextPage: true, endCursor: "page-2" }, nodes: [{ id: "R_1", nameWithOwner: "acme/one", url: "https://github.com/acme/one" }] } }] } } }
+  }, {
+    data: { node: { items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ id: "R_2", nameWithOwner: "acme/two", url: "https://github.com/acme/two" }] } } }
+  }];
+  const result = await fetchGitHubLists("token", async () => ({ ok: true, json: async () => pages.shift() }));
+  assert.deepEqual(result.lists[0].repositories.map((repository) => repository.title), ["acme/one", "acme/two"]);
 });
 
 test("requests GitHub Device Flow with the user scope required for Lists", async () => {
