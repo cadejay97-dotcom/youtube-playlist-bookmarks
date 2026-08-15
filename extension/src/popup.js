@@ -12,31 +12,47 @@ async function folderTitle(id) {
   return folder ? `Destination: ${folder.title}` : "Destination folder is unavailable";
 }
 
+function resultText(result, timestamp, itemName) {
+  if (!result) return "Not synced yet.";
+  if (!result.success) return result.failed?.map((item) => `${item.title}: ${item.error}`).join(" ") || "The last sync did not finish.";
+  return `${dateText(timestamp)} - ${result.ok.length} ${itemName}, ${result.created} added, ${result.updated} updated, ${result.removed} removed`;
+}
+
 async function render() {
   const settings = { ...DEFAULT_SETTINGS, ...(await chrome.storage.local.get(DEFAULT_SETTINGS)) };
-  $("#destination").textContent = await folderTitle(settings.rootFolderId);
-  $("#playlist-count").textContent = `${settings.playlists.length} selected`;
-  $("#interval-note").textContent = `Automatic sync runs every ${settings.syncIntervalMinutes} minute${settings.syncIntervalMinutes === 1 ? "" : "s"} while Chrome is open.`;
-  $("#playlists").replaceChildren(...settings.playlists.map((playlist) => {
-    const item = document.createElement("li");
-    item.textContent = playlist.title;
-    return item;
-  }));
-  const result = settings.lastResult;
-  $("#status-title").textContent = result?.success ? "Last sync completed" : "Ready to sync";
-  $("#status-copy").textContent = result ? `${dateText(settings.lastSync)} - ${result.created} added, ${result.updated} updated, ${result.removed} removed` : "Choose a bookmark folder to begin.";
-  $("#status-dot").classList.toggle("success", Boolean(result?.success));
+  $("#youtube-destination").textContent = await folderTitle(settings.rootFolderId);
+  $("#youtube-count").textContent = `${settings.playlists.length} selected`;
+  $("#youtube-status").textContent = settings.rootFolderId
+    ? resultText(settings.lastResult, settings.lastSync, "playlists")
+    : "Choose a bookmark folder in Settings to begin.";
+
+  $("#github-destination").textContent = await folderTitle(settings.githubRootFolderId);
+  $("#github-account").textContent = settings.githubAccountLogin ? `@${settings.githubAccountLogin}` : "Not connected";
+  $("#github-status").textContent = settings.githubToken
+    ? resultText(settings.githubLastResult, settings.githubLastSync, "Lists")
+    : "Connect GitHub in Settings to begin.";
+  const githubButton = $("#github-sync");
+  githubButton.textContent = settings.githubToken && settings.githubRootFolderId ? "Sync GitHub Lists" : "Connect GitHub";
+  $("#interval-note").textContent = `Automatic checks run every ${settings.syncIntervalMinutes} minute${settings.syncIntervalMinutes === 1 ? "" : "s"} while Chrome is open.`;
 }
 
 $("#settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
-$("#sync").addEventListener("click", async () => {
-  const button = $("#sync");
-  button.disabled = true;
-  button.textContent = "Syncing...";
-  const response = await chrome.runtime.sendMessage({ type: "sync-now" });
-  button.disabled = false;
-  button.textContent = "Sync now";
-  if (!response.ok) $("#status-copy").textContent = response.error;
+$("#youtube-sync").addEventListener("click", async () => {
+  const button = $("#youtube-sync");
+  button.disabled = true; button.textContent = "Syncing...";
+  const response = await chrome.runtime.sendMessage({ type: "youtube-sync-now" });
+  button.disabled = false; button.textContent = "Sync YouTube";
+  if (!response.ok) $("#youtube-status").textContent = response.error;
+  await render();
+});
+$("#github-sync").addEventListener("click", async () => {
+  const settings = { ...DEFAULT_SETTINGS, ...(await chrome.storage.local.get(DEFAULT_SETTINGS)) };
+  if (!settings.githubToken || !settings.githubRootFolderId) { chrome.runtime.openOptionsPage(); return; }
+  const button = $("#github-sync");
+  button.disabled = true; button.textContent = "Syncing...";
+  const response = await chrome.runtime.sendMessage({ type: "github-sync-now" });
+  button.disabled = false; button.textContent = "Sync GitHub Lists";
+  if (!response.ok) $("#github-status").textContent = response.error;
   await render();
 });
 render();

@@ -1,16 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Playlist Bookmarks",
-  "version": "1.0.0",
-  "description": "Keep selected YouTube playlists mirrored as organized Chrome bookmarks.",
+  "name": "Playlist & GitHub Bookmarks",
+  "version": "1.1.0",
+  "description": "Mirror YouTube playlists and GitHub Lists as organized Chrome bookmarks.",
   "permissions": ["bookmarks", "storage", "alarms"],
-  "host_permissions": ["https://www.youtube.com/*"],
+  "host_permissions": ["https://www.youtube.com/*", "https://github.com/*", "https://api.github.com/*"],
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
   },
   "action": {
-    "default_title": "YouTube Playlist Bookmarks",
+    "default_title": "Playlist & GitHub Bookmarks",
     "default_popup": "popup.html"
   },
   "options_page": "options.html",

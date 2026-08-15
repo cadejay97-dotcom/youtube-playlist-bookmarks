@@ -1,25 +1,28 @@
 # Privacy Policy
 
-Last updated: August 15, 2026
+Last updated: August 15, 2026. Version 1.1.0.
 
-YouTube Playlist Bookmarks is designed to work entirely in the user's Chrome profile.
+Playlist & GitHub Bookmarks works inside the user's Chrome profile. It has no backend, analytics, advertising, tracking, or external data store.
 
 ## Data the extension reads
 
-- The YouTube playlist pages that the user selects or keeps in the supplied configuration.
-- The Chrome bookmark tree, solely to let the user select a destination folder and synchronize bookmarks below it.
+- YouTube playlist pages selected by the user.
+- Chrome bookmarks, only to let the user choose destinations and maintain extension-managed bookmarks below them.
+- GitHub Lists and the repository names and URLs they contain, only after the user completes GitHub authorization.
 
-## Data the extension stores
+## Data stored locally
 
-The extension stores the selected bookmark-folder ID, playlist configuration, IDs of bookmarks it created, and the timestamp and summary of the last sync in Chrome's local extension storage. This data stays in the local Chrome profile.
+Chrome extension storage holds destination bookmark-folder IDs, YouTube playlist configuration, GitHub OAuth App Client ID, GitHub access token, GitHub account login, IDs of bookmarks created by the extension, and sync summaries.
+
+The GitHub access token stays in the local Chrome profile. It is sent only to GitHub's OAuth and API endpoints. Clicking **Disconnect** deletes it from local extension storage. The extension never asks for or stores a GitHub password, personal access token, or OAuth client secret.
 
 ## Data sharing
 
-The extension has no backend, analytics, advertising, tracking, account system, or external data transfer. It does not sell, share, or transmit personal data to any party.
+No data is sent to any service operated by this project. Requests go only to YouTube for the configured playlist pages and to GitHub for the GitHub authorization and Lists requested by the user.
 
-## Private playlists
+## Private content
 
-When a user is signed into YouTube in the same Chrome profile, Chrome may include that session in the request needed to read a private playlist. The extension does not read, store, or send account credentials.
+Private YouTube playlists require a YouTube session in the same Chrome profile. GitHub private Lists require authorization from the corresponding GitHub account.
 
 ## Contact
 

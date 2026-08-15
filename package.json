@@ -1,7 +1,7 @@
 {
   "name": "youtube-playlist-bookmarks",
-  "version": "1.0.0",
-  "description": "Mirror YouTube playlists into organized Chrome bookmark folders.",
+  "version": "1.1.0",
+  "description": "Mirror YouTube playlists and GitHub Lists into organized Chrome bookmark folders.",
   "private": true,
   "license": "MIT",
   "repository": {
@@ -15,7 +15,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "validate": "node --check extension/src/background.js && node --check extension/src/bookmarks.js && node --check extension/src/youtube.js && node --check extension/src/popup.js && node --check extension/src/options.js && npm test",
+    "validate": "node --check extension/src/background.js && node --check extension/src/bookmarks.js && node --check extension/src/youtube.js && node --check extension/src/github.js && node --check extension/src/github-auth.js && node --check extension/src/github-sync.js && node --check extension/src/popup.js && node --check extension/src/options.js && npm test",
     "package": "rm -f outputs/youtube-playlist-bookmarks.zip && cd extension && zip -r ../outputs/youtube-playlist-bookmarks.zip . -x '*.DS_Store'"
   }
 }

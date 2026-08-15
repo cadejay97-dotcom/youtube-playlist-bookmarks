@@ -49,7 +49,7 @@ export async function mirrorPlaylist({ rootFolderId, playlist, folderId, managed
     }
   }
 
-  // Place extension-managed bookmarks in the same order as the YouTube playlist.
+  // Keep extension-managed bookmarks in the same order as their source list.
   for (const [index, video] of playlist.videos.entries()) {
     await chrome.bookmarks.move(nextManaged[video.id], { parentId: resolvedFolderId, index });
   }

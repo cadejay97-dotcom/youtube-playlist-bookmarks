@@ -1,12 +1,11 @@
 <!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="styles/app.css"><title>YouTube Playlist Bookmarks</title></head>
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="styles/app.css"><title>Bookmarks Sync</title></head>
   <body class="popup">
     <main>
-      <header><span class="mark">YT</span><div><h1>Playlist Bookmarks</h1><p id="destination">No destination folder selected</p></div><button id="settings" class="icon-button" aria-label="Open settings" title="Open settings">&#9881;</button></header>
-      <section class="status"><span id="status-dot" class="dot"></span><div><strong id="status-title">Ready to sync</strong><p id="status-copy">Choose a bookmark folder to begin.</p></div></section>
-      <section><div class="section-heading"><h2>Playlists</h2><span id="playlist-count"></span></div><ul id="playlists" class="playlist-list"></ul></section>
-      <button id="sync" class="primary">Sync now</button>
+      <header><span class="mark">BM</span><div><h1>Bookmarks Sync</h1><p>Separate YouTube playlists and GitHub Lists.</p></div><button id="settings" class="icon-button" aria-label="Open settings" title="Open settings">&#9881;</button></header>
+      <section class="sync-card"><div class="provider-heading"><div><h2>YouTube Playlists</h2><p id="youtube-destination">No destination folder selected</p></div><span id="youtube-count" class="count"></span></div><p id="youtube-status" class="card-status">Choose a bookmark folder in Settings to begin.</p><button id="youtube-sync" class="primary">Sync YouTube</button></section>
+      <section class="sync-card github-card"><div class="provider-heading"><div><h2>GitHub Lists</h2><p id="github-destination">No destination folder selected</p></div><span id="github-account" class="count"></span></div><p id="github-status" class="card-status">Connect GitHub in Settings to begin.</p><button id="github-sync" class="secondary wide">Connect GitHub</button></section>
       <p id="interval-note" class="note"></p>
     </main>
     <script type="module" src="src/popup.js"></script>

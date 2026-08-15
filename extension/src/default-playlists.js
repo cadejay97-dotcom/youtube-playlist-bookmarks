@@ -40,5 +40,15 @@ export const DEFAULT_SETTINGS = {
   managedBookmarks: {},
   playlistFolderIds: {},
   lastSync: null,
-  lastResult: null
+  lastResult: null,
+  githubRootFolderId: null,
+  githubContainerName: "项目清单",
+  githubContainerId: null,
+  githubClientId: "",
+  githubToken: null,
+  githubAccountLogin: null,
+  githubListFolderIds: {},
+  githubManagedBookmarks: {},
+  githubLastSync: null,
+  githubLastResult: null
 };

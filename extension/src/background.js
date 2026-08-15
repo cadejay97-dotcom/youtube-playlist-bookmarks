@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS } from "./default-playlists.js";
 import { ensureFolder, mirrorPlaylist } from "./bookmarks.js";
 import { fetchPlaylist } from "./youtube.js";
+import { syncGitHubLists } from "./github-sync.js";
 
 const ALARM_NAME = "playlist-bookmark-sync";
 
@@ -68,11 +69,20 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === ALARM_NAME) syncAll().catch(() => undefined);
+  if (alarm.name !== ALARM_NAME) return;
+  getSettings().then((settings) => {
+    if (settings.rootFolderId) syncAll().catch(() => undefined);
+    if (settings.githubRootFolderId && settings.githubToken) syncGitHubLists().catch(() => undefined);
+  });
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
-  if (message.type !== "sync-now") return;
-  syncAll().then((result) => respond({ ok: true, result })).catch((error) => respond({ ok: false, error: error.message }));
-  return true;
+  if (message.type === "sync-now" || message.type === "youtube-sync-now") {
+    syncAll().then((result) => respond({ ok: true, result })).catch((error) => respond({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message.type === "github-sync-now") {
+    syncGitHubLists().then((result) => respond({ ok: true, result })).catch((error) => respond({ ok: false, error: error.message }));
+    return true;
+  }
 });
