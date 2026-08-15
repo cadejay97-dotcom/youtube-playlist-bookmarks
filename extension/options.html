@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="styles/app.css"><title>Playlist Bookmarks Settings</title></head>
+  <body class="options">
+    <main>
+      <header class="page-header"><span class="mark">YT</span><div><h1>Playlist Bookmarks</h1><p>Mirror YouTube playlists into Chrome bookmarks.</p></div></header>
+      <section class="panel"><h2>Destination</h2><p class="hint">The extension creates a "播放清单" folder here, then places each playlist inside it.</p><label for="folder">Bookmark folder</label><select id="folder"></select></section>
+      <section class="panel"><h2>Automatic updates</h2><p class="hint">YouTube does not offer a browser event for playlist changes, so updates are checked on this interval while Chrome is running.</p><label for="interval">Check every</label><select id="interval"><option value="1">1 minute</option><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></section>
+      <section class="panel"><div class="section-heading"><div><h2>Playlists</h2><p class="hint">A playlist folder is created only after the first successful sync.</p></div><button id="add" class="secondary">Add playlist</button></div><div id="playlist-editor"></div></section>
+      <div class="actions"><span id="saved" role="status"></span><button id="save" class="primary">Save settings</button></div>
+    </main>
+    <template id="playlist-template"><article class="playlist-row"><label>Playlist name<input class="playlist-title" required></label><label>Playlist URL or ID<input class="playlist-url" required></label><button class="remove icon-button" aria-label="Remove playlist" title="Remove playlist">&#215;</button></article></template>
+    <script type="module" src="src/options.js"></script>
+  </body>
+</html>

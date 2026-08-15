@@ -1,0 +1,11 @@
+{
+  "name": "youtube-playlist-bookmarks",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "validate": "node --check extension/src/background.js && node --check extension/src/bookmarks.js && node --check extension/src/youtube.js && node --check extension/src/popup.js && node --check extension/src/options.js && npm test",
+    "package": "rm -f outputs/youtube-playlist-bookmarks.zip && cd extension && zip -r ../outputs/youtube-playlist-bookmarks.zip . -x '*.DS_Store'"
+  }
+}

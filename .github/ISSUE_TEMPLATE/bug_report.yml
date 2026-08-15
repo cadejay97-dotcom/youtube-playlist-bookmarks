@@ -1,0 +1,21 @@
+name: Bug report
+description: Report an issue syncing a YouTube playlist or Chrome bookmarks.
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: Include expected and actual bookmark behavior. Do not include private video URLs unless necessary.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Extension version
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
