@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parsePlaylistHtml } from "../extension/src/youtube.js";
+import { fetchPlaylist, parsePlaylistHtml } from "../extension/src/youtube.js";
 
 const payload = { contents: [{ playlistVideoRenderer: { videoId: "abc123", title: { runs: [{ text: "First video" }] } } }, { playlistPanelVideoRenderer: { videoId: "xyz789", title: { simpleText: "Second video" } } }], sidebar: { playlistSidebarPrimaryInfoRenderer: { title: { runs: [{ text: "Sample list" }] } } } };
 const html = `<script>var ytInitialData = ${JSON.stringify(payload)};</script>`;
@@ -20,4 +20,20 @@ test("does not terminate JSON parsing at a semicolon inside a video title", () =
   const special = { contents: [{ playlistVideoRenderer: { videoId: "abc123", title: { simpleText: "A title }; still inside JSON" } } }] };
   const result = parsePlaylistHtml(`<script>var ytInitialData = ${JSON.stringify(special)};</script>`, "PLsample");
   assert.equal(result.videos[0].title, "A title }; still inside JSON");
+});
+
+test("fetches a playlist by ID when no full YouTube URL is supplied", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl;
+  globalThis.fetch = async (url) => {
+    requestedUrl = String(url);
+    return { ok: true, text: async () => html };
+  };
+  try {
+    const result = await fetchPlaylist({ id: "PLsample", title: "Sample", url: "PLsample" });
+    assert.match(requestedUrl, /youtube\.com\/playlist\?list=PLsample/);
+    assert.equal(result.videos.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

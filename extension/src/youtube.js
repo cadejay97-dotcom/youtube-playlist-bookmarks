@@ -74,7 +74,12 @@ export function parsePlaylistHtml(html, playlistId) {
 }
 
 export async function fetchPlaylist(playlist) {
-  const url = new URL(playlist.url);
+  let url;
+  try {
+    url = new URL(playlist.url);
+  } catch {
+    url = new URL("https://www.youtube.com/playlist");
+  }
   url.searchParams.set("list", playlist.id);
   url.searchParams.set("hl", "en");
   const response = await fetch(url, { credentials: "include" });
