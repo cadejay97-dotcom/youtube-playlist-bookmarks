@@ -56,6 +56,21 @@ test("paginates through repository bookmarks in a GitHub List", async () => {
   assert.deepEqual(result.lists[0].repositories.map((repository) => repository.title), ["acme/one", "acme/two"]);
 });
 
+test("paginates through GitHub Lists as well as their repository bookmarks", async () => {
+  const pages = [{
+    data: { viewer: { login: "octocat", lists: { pageInfo: { hasNextPage: true, endCursor: "lists-page-2" }, nodes: [{ id: "UL_1", name: "One", slug: "one", description: "", isPrivate: false, items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } }] } } }
+  }, {
+    data: { viewer: { login: "octocat", lists: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ id: "UL_2", name: "Two", slug: "two", description: "", isPrivate: false, items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } }] } } }
+  }];
+  const requestedVariables = [];
+  const result = await fetchGitHubLists("token", async (_url, options) => {
+    requestedVariables.push(JSON.parse(options.body).variables);
+    return { ok: true, json: async () => pages.shift() };
+  });
+  assert.deepEqual(result.lists.map((list) => list.title), ["One", "Two"]);
+  assert.deepEqual(requestedVariables, [{ after: null }, { after: "lists-page-2" }]);
+});
+
 test("requests GitHub Device Flow with the user scope required for Lists", async () => {
   let body;
   const device = await requestDeviceCode("Iv1.client", async (_url, options) => {
