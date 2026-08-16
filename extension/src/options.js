@@ -1,10 +1,8 @@
 import { DEFAULT_SETTINGS } from "./default-playlists.js";
 import { listFolders } from "./bookmarks.js";
-import { requestDeviceCode, pollForGitHubToken } from "./github-auth.js";
-import { fetchGitHubViewer } from "./github.js";
-import { GITHUB_OAUTH_CLIENT_ID } from "./github-config.js";
 
 const $ = (selector) => document.querySelector(selector);
+let githubAuth = { status: "idle" };
 
 function playlistId(value) {
   try { return new URL(value).searchParams.get("list") || value.trim(); } catch { return value.trim(); }
@@ -30,6 +28,33 @@ function updateGitHubConnection(settings) {
   $("#github-account").classList.toggle("connected", connected);
   $("#github-connect").textContent = connected ? "Reconnect GitHub" : "Connect GitHub";
   $("#github-disconnect").hidden = !connected;
+}
+
+function renderGitHubAuth(auth) {
+  githubAuth = auth || { status: "idle" };
+  const feedback = $("#github-feedback");
+  const deviceLine = $("#github-device");
+  const actions = $("#github-auth-actions");
+  const active = ["code", "pending"].includes(githubAuth.status);
+  $("#github-connect").disabled = active;
+  deviceLine.hidden = !active;
+  actions.hidden = !active;
+  $("#github-continue").hidden = githubAuth.status !== "code";
+  if (active) deviceLine.textContent = `GitHub one-time code: ${githubAuth.userCode}`;
+  if (githubAuth.status === "code") feedback.textContent = "Your code is ready. Copy it and continue to GitHub.";
+  if (githubAuth.status === "pending") feedback.textContent = "Waiting for GitHub approval. You may close and reopen Settings without losing this attempt.";
+  if (githubAuth.status === "failed") feedback.textContent = githubAuth.error || "GitHub sign-in failed. Start again.";
+}
+
+async function refreshGitHubAuth() {
+  const response = await chrome.runtime.sendMessage({ type: "github-auth-status" });
+  if (!response.ok) throw new Error(response.error);
+  renderGitHubAuth(response.auth);
+  if (response.auth.status === "connected") {
+    const settings = { ...DEFAULT_SETTINGS, ...(await chrome.storage.local.get(DEFAULT_SETTINGS)) };
+    updateGitHubConnection(settings);
+    $("#github-feedback").textContent = `Connected as @${response.auth.accountLogin}. Choose a destination, save, then sync.`;
+  }
 }
 
 function collectYouTubePlaylists() {
@@ -60,6 +85,7 @@ async function load() {
   $("#interval").value = String(settings.syncIntervalMinutes);
   settings.playlists.forEach(addPlaylist);
   updateGitHubConnection(settings);
+  await refreshGitHubAuth();
 }
 
 $("#add").addEventListener("click", () => addPlaylist());
@@ -67,33 +93,46 @@ $("#save").addEventListener("click", () => saveSettings());
 
 $("#github-connect").addEventListener("click", async () => {
   const feedback = $("#github-feedback");
-  const deviceLine = $("#github-device");
   feedback.textContent = "";
-  deviceLine.hidden = true;
   try {
     await saveSettings({ showFeedback: false });
-    const device = await requestDeviceCode(GITHUB_OAUTH_CLIENT_ID);
-    deviceLine.textContent = `Enter code ${device.user_code} at ${device.verification_uri}`;
-    deviceLine.hidden = false;
-    await chrome.tabs.create({ url: device.verification_uri });
-    feedback.textContent = "Waiting for GitHub authorization...";
-    const credentials = await pollForGitHubToken(device, GITHUB_OAUTH_CLIENT_ID);
-    const viewer = await fetchGitHubViewer(credentials.accessToken);
-    await chrome.storage.local.set({
-      githubToken: credentials.accessToken,
-      githubRefreshToken: credentials.refreshToken,
-      githubTokenExpiresAt: credentials.expiresAt,
-      githubRefreshTokenExpiresAt: credentials.refreshTokenExpiresAt,
-      githubAccountLogin: viewer.login
-    });
-    updateGitHubConnection({ githubToken: credentials.accessToken, githubAccountLogin: viewer.login });
-    feedback.textContent = `Connected as @${viewer.login}. Choose a destination, save, then sync.`;
+    const response = await chrome.runtime.sendMessage({ type: "github-auth-start" });
+    if (!response.ok) throw new Error(response.error);
+    renderGitHubAuth(response.auth);
   } catch (error) {
     feedback.textContent = error.message;
+    $("#github-connect").disabled = false;
   }
 });
 
+$("#github-continue").addEventListener("click", async () => {
+  const feedback = $("#github-feedback");
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(githubAuth.userCode);
+    copied = true;
+  } catch {
+    copied = false;
+  }
+  const response = await chrome.runtime.sendMessage({ type: "github-auth-continue" });
+  if (!response.ok) {
+    feedback.textContent = response.error;
+    return;
+  }
+  renderGitHubAuth(response.auth);
+  feedback.textContent = copied
+    ? "Code copied. Paste it on GitHub and approve access."
+    : `Copy ${githubAuth.userCode}, paste it on GitHub, and approve access.`;
+});
+
+$("#github-cancel").addEventListener("click", async () => {
+  const response = await chrome.runtime.sendMessage({ type: "github-auth-cancel" });
+  renderGitHubAuth(response.ok ? response.auth : { status: "failed", error: response.error });
+  $("#github-feedback").textContent = response.ok ? "GitHub sign-in canceled." : response.error;
+});
+
 $("#github-disconnect").addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({ type: "github-auth-cancel" });
   await chrome.storage.local.set({
     githubToken: null,
     githubRefreshToken: null,
@@ -104,6 +143,7 @@ $("#github-disconnect").addEventListener("click", async () => {
     githubLastSync: null
   });
   updateGitHubConnection({});
+  renderGitHubAuth({ status: "idle" });
   $("#github-feedback").textContent = "GitHub disconnected. Existing bookmarks were not changed.";
 });
 
@@ -118,3 +158,9 @@ $("#github-sync").addEventListener("click", async () => {
 });
 
 load();
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "session" && changes.githubAuthSession) refreshGitHubAuth().catch((error) => {
+    $("#github-feedback").textContent = error.message;
+  });
+});

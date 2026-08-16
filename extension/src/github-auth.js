@@ -37,22 +37,28 @@ export async function pollForGitHubToken(device, clientId, { request = fetch, sl
   while (elapsedSeconds < expiresIn) {
     await sleep(intervalSeconds * 1000);
     elapsedSeconds += intervalSeconds;
-    const response = await request(ACCESS_TOKEN_URL, {
-      method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
-      body: formBody({
-        client_id: clientId.trim(),
-        device_code: device.device_code,
-        grant_type: "urn:ietf:params:oauth:grant-type:device_code"
-      })
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (payload.access_token) return tokenCredentials(payload);
-    if (payload.error === "authorization_pending") continue;
-    if (payload.error === "slow_down") { intervalSeconds += 5; continue; }
-    throw new Error(payload.error_description || payload.error || `GitHub authorization failed (${response.status}).`);
+    const result = await pollGitHubTokenOnce(device.device_code, clientId, { request });
+    if (result.status === "authorized") return result.credentials;
+    if (result.status === "slow_down") intervalSeconds = Math.max(intervalSeconds + 5, result.intervalSeconds || 0);
   }
   throw new Error("GitHub sign-in timed out. Start the connection again.");
+}
+
+export async function pollGitHubTokenOnce(deviceCode, clientId, { request = fetch, now = Date.now() } = {}) {
+  const response = await request(ACCESS_TOKEN_URL, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+    body: formBody({
+      client_id: clientId.trim(),
+      device_code: deviceCode,
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (payload.access_token) return { status: "authorized", credentials: tokenCredentials(payload, now) };
+  if (payload.error === "authorization_pending") return { status: "pending" };
+  if (payload.error === "slow_down") return { status: "slow_down", intervalSeconds: Number(payload.interval) || null };
+  throw new Error(payload.error_description || payload.error || `GitHub authorization failed (${response.status}).`);
 }
 
 export async function refreshGitHubToken(refreshToken, clientId, { request = fetch, now = Date.now() } = {}) {

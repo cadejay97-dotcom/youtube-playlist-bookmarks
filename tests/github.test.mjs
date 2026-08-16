@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fetchGitHubLists, parseGitHubLists } from "../extension/src/github.js";
-import { pollForGitHubToken, refreshGitHubToken, requestDeviceCode } from "../extension/src/github-auth.js";
+import { pollForGitHubToken, pollGitHubTokenOnce, refreshGitHubToken, requestDeviceCode } from "../extension/src/github-auth.js";
 
 const graphQlPayload = {
   data: {
@@ -97,6 +97,27 @@ test("polls through authorization_pending and returns the approved token", async
   assert.ok(credentials.expiresAt > Date.now());
 });
 
+test("reports one Device Flow poll without owning the page lifecycle", async () => {
+  const pending = await pollGitHubTokenOnce("device", "Iv1.client", {
+    request: async () => ({ ok: true, json: async () => ({ error: "authorization_pending" }) })
+  });
+  assert.deepEqual(pending, { status: "pending" });
+
+  const slowed = await pollGitHubTokenOnce("device", "Iv1.client", {
+    request: async () => ({ ok: true, json: async () => ({ error: "slow_down", interval: 10 }) })
+  });
+  assert.deepEqual(slowed, { status: "slow_down", intervalSeconds: 10 });
+
+  const approved = await pollGitHubTokenOnce("device", "Iv1.client", {
+    now: 1_000,
+    request: async () => ({ ok: true, json: async () => ({ access_token: "approved-token", expires_in: 100 }) })
+  });
+  assert.deepEqual(approved, {
+    status: "authorized",
+    credentials: { accessToken: "approved-token", refreshToken: null, expiresAt: 101_000, refreshTokenExpiresAt: null }
+  });
+});
+
 test("refreshes an expiring Device Flow token without a client secret", async () => {
   let body;
   const credentials = await refreshGitHubToken("old-refresh", "Iv1.client", {
@@ -111,4 +132,85 @@ test("refreshes an expiring Device Flow token without a client secret", async ()
   assert.equal(body.get("grant_type"), "refresh_token");
   assert.equal(body.get("client_secret"), null);
   assert.deepEqual(credentials, { accessToken: "new-access", refreshToken: "new-refresh", expiresAt: 101_000, refreshTokenExpiresAt: 201_000 });
+});
+
+test("keeps GitHub authorization in the background until the account is connected", async () => {
+  const originalChrome = globalThis.chrome;
+  const originalFetch = globalThis.fetch;
+  const local = {};
+  const session = {};
+  const alarms = new Map();
+  const openedTabs = [];
+  let onAlarm;
+  let onMessage;
+
+  const read = (store, query) => {
+    if (Array.isArray(query)) return Object.fromEntries(query.map((key) => [key, store[key]]));
+    if (typeof query === "string") return { [query]: store[query] };
+    if (query && typeof query === "object") return { ...query, ...store };
+    return { ...store };
+  };
+
+  globalThis.chrome = {
+    alarms: {
+      clear: async (name) => alarms.delete(name),
+      create: (name, value) => alarms.set(name, value),
+      onAlarm: { addListener: (listener) => { onAlarm = listener; } }
+    },
+    bookmarks: {},
+    runtime: {
+      onInstalled: { addListener: () => undefined },
+      onMessage: { addListener: (listener) => { onMessage = listener; } }
+    },
+    storage: {
+      local: {
+        get: async (query) => read(local, query),
+        set: async (values) => Object.assign(local, values)
+      },
+      session: {
+        get: async (query) => read(session, query),
+        set: async (values) => Object.assign(session, values),
+        remove: async (key) => { delete session[key]; }
+      },
+      onChanged: { addListener: () => undefined }
+    },
+    tabs: { create: async ({ url }) => { openedTabs.push(url); } }
+  };
+  globalThis.fetch = async (url) => {
+    if (url === "https://github.com/login/device/code") {
+      return { ok: true, json: async () => ({ device_code: "device", user_code: "ABCD-EFGH", verification_uri: "https://github.com/login/device", expires_in: 900, interval: 5 }) };
+    }
+    if (url === "https://github.com/login/oauth/access_token") {
+      return { ok: true, json: async () => ({ access_token: "approved-token", expires_in: 28800 }) };
+    }
+    if (url === "https://api.github.com/user") {
+      return { ok: true, json: async () => ({ login: "octocat" }) };
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  try {
+    await import(`../extension/src/background.js?auth-test=${Date.now()}`);
+    const send = (message) => new Promise((resolve) => onMessage(message, {}, resolve));
+    const started = await send({ type: "github-auth-start" });
+    assert.equal(started.auth.status, "code");
+    assert.equal(started.auth.userCode, "ABCD-EFGH");
+    assert.equal(started.auth.deviceCode, undefined);
+
+    const continued = await send({ type: "github-auth-continue" });
+    assert.equal(continued.auth.status, "pending");
+    assert.deepEqual(openedTabs, ["https://github.com/login/device"]);
+    assert.ok(alarms.has("github-auth-poll"));
+
+    onAlarm({ name: "github-auth-poll" });
+    for (let attempt = 0; attempt < 20 && session.githubAuthSession?.status !== "connected"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    assert.equal(session.githubAuthSession.status, "connected");
+    assert.equal(local.githubToken, "approved-token");
+    assert.equal(local.githubAccountLogin, "octocat");
+  } finally {
+    globalThis.chrome = originalChrome;
+    globalThis.fetch = originalFetch;
+  }
 });
