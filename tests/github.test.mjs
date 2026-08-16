@@ -141,6 +141,8 @@ test("keeps GitHub authorization in the background until the account is connecte
   const session = {};
   const alarms = new Map();
   const openedTabs = [];
+  let tokenPolls = 0;
+  let alarmCreates = 0;
   let onAlarm;
   let onMessage;
 
@@ -154,7 +156,7 @@ test("keeps GitHub authorization in the background until the account is connecte
   globalThis.chrome = {
     alarms: {
       clear: async (name) => alarms.delete(name),
-      create: (name, value) => alarms.set(name, value),
+      create: (name, value) => { alarmCreates += 1; alarms.set(name, value); },
       onAlarm: { addListener: (listener) => { onAlarm = listener; } }
     },
     bookmarks: {},
@@ -181,7 +183,10 @@ test("keeps GitHub authorization in the background until the account is connecte
       return { ok: true, json: async () => ({ device_code: "device", user_code: "ABCD-EFGH", verification_uri: "https://github.com/login/device", expires_in: 900, interval: 5 }) };
     }
     if (url === "https://github.com/login/oauth/access_token") {
-      return { ok: true, json: async () => ({ access_token: "approved-token", expires_in: 28800 }) };
+      tokenPolls += 1;
+      return { ok: true, json: async () => tokenPolls === 1
+        ? ({ error: "authorization_pending" })
+        : ({ access_token: "approved-token", expires_in: 28800 }) };
     }
     if (url === "https://api.github.com/user") {
       return { ok: true, json: async () => ({ login: "octocat" }) };
@@ -200,6 +205,15 @@ test("keeps GitHub authorization in the background until the account is connecte
     const continued = await send({ type: "github-auth-continue" });
     assert.equal(continued.auth.status, "pending");
     assert.deepEqual(openedTabs, ["https://github.com/login/device"]);
+    assert.ok(alarms.has("github-auth-poll"));
+
+    onAlarm({ name: "github-auth-poll" });
+    for (let attempt = 0; attempt < 20 && alarmCreates < 2; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    assert.equal(session.githubAuthSession.status, "pending");
+    assert.equal(tokenPolls, 1);
+    assert.equal(alarmCreates, 2);
     assert.ok(alarms.has("github-auth-poll"));
 
     onAlarm({ name: "github-auth-poll" });

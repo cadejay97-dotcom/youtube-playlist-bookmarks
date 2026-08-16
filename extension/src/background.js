@@ -57,6 +57,7 @@ async function startGitHubAuthorization() {
   if (githubAuthStartPromise) return githubAuthStartPromise;
   githubAuthStartPromise = (async () => {
     await chrome.alarms.clear(GITHUB_AUTH_ALARM_NAME);
+    await chrome.storage.session.remove(GITHUB_AUTH_SESSION_KEY);
     const device = await requestDeviceCode(GITHUB_OAUTH_CLIENT_ID);
     const now = Date.now();
     return setGitHubAuthSession({
@@ -82,10 +83,17 @@ async function continueGitHubAuthorization() {
   if (!session || !["code", "pending"].includes(session.status)) throw new Error("Start GitHub sign-in again.");
   if (session.expiresAt <= Date.now()) throw new Error("The GitHub code expired. Start GitHub sign-in again.");
   const nextPollAt = Date.now() + (session.intervalSeconds * 1000);
-  await setGitHubAuthSession({ ...session, status: "pending", nextPollAt });
-  await chrome.tabs.create({ url: session.verificationUri });
+  const pendingSession = { ...session, status: "pending", nextPollAt };
+  await setGitHubAuthSession(pendingSession);
   chrome.alarms.create(GITHUB_AUTH_ALARM_NAME, { when: nextPollAt });
-  return publicGitHubAuth({ ...session, status: "pending", nextPollAt });
+  try {
+    await chrome.tabs.create({ url: session.verificationUri });
+  } catch (error) {
+    await chrome.alarms.clear(GITHUB_AUTH_ALARM_NAME);
+    await setGitHubAuthSession({ ...session, status: "code", nextPollAt: null });
+    throw error;
+  }
+  return publicGitHubAuth(pendingSession);
 }
 
 async function cancelGitHubAuthorization() {
@@ -98,7 +106,7 @@ async function pollGitHubAuthorization() {
   const session = await getGitHubAuthSession();
   if (!session || session.status !== "pending") return;
   if (session.expiresAt <= Date.now()) {
-    await setGitHubAuthSession({ ...session, status: "failed", error: "The GitHub code expired. Start again." });
+    await setGitHubAuthSession({ status: "failed", error: "The GitHub code expired. Start again." });
     return;
   }
   try {
@@ -122,7 +130,7 @@ async function pollGitHubAuthorization() {
     await setGitHubAuthSession({ ...session, status: "pending", intervalSeconds, nextPollAt });
     chrome.alarms.create(GITHUB_AUTH_ALARM_NAME, { when: nextPollAt });
   } catch (error) {
-    await setGitHubAuthSession({ ...session, status: "failed", error: error.message });
+    await setGitHubAuthSession({ status: "failed", error: error.message });
   }
 }
 
