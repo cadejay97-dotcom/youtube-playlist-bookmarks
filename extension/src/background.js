@@ -95,6 +95,24 @@ function publicGitHubAuth(session) {
   };
 }
 
+function validGitHubAuthSession(session) {
+  if (!session || typeof session !== "object" || typeof session.status !== "string") return false;
+  if (["requesting", "failed"].includes(session.status)) return typeof session.attemptId === "string" && Boolean(session.attemptId);
+  if (session.status === "connected") return typeof session.attemptId === "string" && typeof session.accountLogin === "string" && Boolean(session.accountLogin);
+  if (["code", "pending"].includes(session.status)) {
+    return typeof session.attemptId === "string"
+      && typeof session.deviceCode === "string" && Boolean(session.deviceCode)
+      && typeof session.userCode === "string" && Boolean(session.userCode)
+      && typeof session.verificationUri === "string" && session.verificationUri.startsWith("https://github.com/login/device")
+      && Number.isFinite(Number(session.expiresAt))
+      && Number.isFinite(Number(session.intervalSeconds));
+  }
+  if (session.status === "verifying") {
+    return typeof session.attemptId === "string" && Boolean(session.attemptId) && Number.isFinite(Number(session.verificationExpiresAt));
+  }
+  return false;
+}
+
 async function getGitHubAuthSession() {
   const stored = await chrome.storage.session.get(GITHUB_AUTH_SESSION_KEY);
   return stored[GITHUB_AUTH_SESSION_KEY] || null;
@@ -152,7 +170,7 @@ async function recoverGitHubAuthorization() {
       };
       await setGitHubAuthSession(session);
     }
-    if (!session || !["pending", "verifying"].includes(session.status)) return session;
+    if (!session || !["code", "pending", "verifying"].includes(session.status)) return session;
     if (session.status === "pending" && candidate?.attemptId === session.attemptId) {
       session = {
         ...session,
@@ -169,6 +187,7 @@ async function recoverGitHubAuthorization() {
       await clearGitHubAuthCandidate(session.attemptId);
       return setGitHubAuthSession({ status: "failed", attemptId: session.attemptId, error: "The GitHub code expired. Start again." });
     }
+    if (session.status === "code") return session;
     const alarm = await chrome.alarms.get(GITHUB_AUTH_ALARM_NAME);
     if (!alarm || Number(alarm.scheduledTime) < Date.now() - 5_000) {
       const nextPollAt = Math.max(Date.now() + 1_000, Number(session.nextPollAt) || 0);
@@ -181,8 +200,18 @@ async function recoverGitHubAuthorization() {
 
 async function githubAuthStatus() {
   let session = await getGitHubAuthSession();
+  if (session && !validGitHubAuthSession(session)) {
+    await runGitHubAuthTransition(async () => {
+      const invalid = await getGitHubAuthSession();
+      if (!invalid || validGitHubAuthSession(invalid)) return;
+      await chrome.alarms.clear(GITHUB_AUTH_ALARM_NAME);
+      await clearGitHubAuthCandidate(invalid.attemptId);
+      await chrome.storage.session.remove(GITHUB_AUTH_SESSION_KEY);
+    });
+    session = await getGitHubAuthSession();
+  }
   const candidate = await getGitHubAuthCandidate();
-  if (["pending", "verifying"].includes(session?.status) || (!session && candidate?.attemptId)) {
+  if (["code", "pending", "verifying"].includes(session?.status) || (!session && candidate?.attemptId)) {
     session = await recoverGitHubAuthorization();
   }
   const account = await chrome.storage.local.get(["githubToken", "githubAccountLogin", "githubAuthAttemptId"]);

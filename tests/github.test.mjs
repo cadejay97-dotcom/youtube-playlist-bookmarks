@@ -264,6 +264,11 @@ test("keeps GitHub authorization in the background until the account is connecte
     assert.equal(local.lastAttempt.status, "success");
     assert.equal(local.lastAttempt.trigger, "manual");
 
+    session.githubAuthSession = { status: "code", attemptId: "legacy-broken-session" };
+    const recoveredLegacySession = await send({ type: "github-auth-status" });
+    assert.deepEqual(recoveredLegacySession, { ok: true, auth: { status: "idle" } });
+    assert.equal(session.githubAuthSession, undefined);
+
     const started = await send({ type: "github-auth-start" });
     assert.equal(started.auth.status, "code");
     assert.equal(started.auth.userCode, "ABCD-EFGH");
