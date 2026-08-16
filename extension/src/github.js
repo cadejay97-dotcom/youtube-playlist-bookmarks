@@ -1,5 +1,28 @@
 const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
 const MAX_PAGES = 100;
+const REQUEST_TIMEOUT_MS = 20_000;
+
+function githubRequestError(message, { retryable = false, status = null } = {}) {
+  const error = new Error(message);
+  error.retryable = retryable;
+  error.status = status;
+  return error;
+}
+
+async function requestGitHub(url, options, request) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await request(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    throw githubRequestError(
+      error?.name === "AbortError" ? "GitHub did not respond in time." : "GitHub could not be reached.",
+      { retryable: true }
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 export const GITHUB_LISTS_QUERY = `
   query ViewerLists($after: String) {
@@ -66,7 +89,7 @@ export function parseGitHubLists(payload) {
 }
 
 async function queryGitHub(token, query, variables, request) {
-  const response = await request(GITHUB_GRAPHQL_URL, {
+  const response = await requestGitHub(GITHUB_GRAPHQL_URL, {
     method: "POST",
     headers: {
       Accept: "application/vnd.github+json",
@@ -74,9 +97,12 @@ async function queryGitHub(token, query, variables, request) {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({ query, variables })
-  });
+  }, request);
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.message || `GitHub returned ${response.status}. Reconnect GitHub in Settings.`);
+  if (!response.ok) throw githubRequestError(payload.message || `GitHub returned ${response.status}. Reconnect GitHub in Settings.`, {
+    retryable: response.status === 429 || response.status >= 500,
+    status: response.status
+  });
   if (payload.errors?.length) throw new Error(payload.errors.map((error) => error.message).join(" "));
   return payload;
 }
@@ -149,10 +175,13 @@ export async function fetchGitHubLists(token, request = fetch) {
 }
 
 export async function fetchGitHubViewer(token, request = fetch) {
-  const response = await request("https://api.github.com/user", {
+  const response = await requestGitHub("https://api.github.com/user", {
     headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}` }
-  });
+  }, request);
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.login) throw new Error(payload.message || "GitHub authorization could not be verified.");
+  if (!response.ok || !payload.login) throw githubRequestError(payload.message || "GitHub authorization could not be verified.", {
+    retryable: response.status === 429 || response.status >= 500 || response.ok,
+    status: response.status
+  });
   return payload;
 }

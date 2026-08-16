@@ -1,4 +1,5 @@
 const PLAYLIST_RENDERERS = ["playlistVideoRenderer", "playlistPanelVideoRenderer"];
+const REQUEST_TIMEOUT_MS = 20_000;
 
 function extractInitialData(html) {
   const assignment = /(?:var\s+)?ytInitialData\s*=\s*/.exec(html);
@@ -79,7 +80,16 @@ export async function fetchPlaylist(playlist) {
   const url = new URL("https://www.youtube.com/playlist");
   url.searchParams.set("list", playlistId);
   url.searchParams.set("hl", "en");
-  const response = await fetch(url, { credentials: "include" });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(url, { credentials: "include", signal: controller.signal });
+  } catch (error) {
+    throw new Error(error?.name === "AbortError" ? `YouTube timed out for ${playlist.title}.` : `YouTube could not be reached for ${playlist.title}.`);
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) throw new Error(`YouTube returned ${response.status} for ${playlist.title}.`);
   const result = parsePlaylistHtml(await response.text(), playlistId);
   return { ...playlist, title: result.title || playlist.title, videos: result.videos };

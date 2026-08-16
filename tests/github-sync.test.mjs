@@ -31,7 +31,10 @@ test("creates project list, GitHub List, and repository bookmark hierarchy", asy
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({
     ok: true,
-    json: async () => ({ data: { viewer: { login: "octocat", lists: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ id: "UL_1", name: "Lark AI Native", slug: "lark-ai-native", items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ id: "R_1", nameWithOwner: "acme/project", url: "https://github.com/acme/project" }] } }] } } } })
+    json: async () => ({ data: { viewer: { login: "octocat", lists: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [
+      { id: "UL_1", name: "Lark AI Native", slug: "lark-ai-native", isPrivate: false, items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ id: "R_1", nameWithOwner: "acme/project", url: "https://github.com/acme/project" }] } },
+      { id: "UL_PRIVATE", name: "Private research", slug: "private-research", isPrivate: true, items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ id: "R_PRIVATE", nameWithOwner: "acme/private", url: "https://github.com/acme/private" }] } }
+    ] } } } })
   });
   try {
     const result = await syncGitHubLists();
@@ -42,6 +45,8 @@ test("creates project list, GitHub List, and repository bookmark hierarchy", asy
     assert.equal(repository.title, "acme/project");
     assert.equal(repository.url, "https://github.com/acme/project");
     assert.equal(result.created, 1);
+    assert.equal(result.skippedPrivate, 1);
+    assert.equal(bookmarks.children.get(container.id).some((id) => bookmarks.nodes.get(id).title === "Private research"), false);
     assert.equal(storage.githubAccountLogin, "octocat");
   } finally {
     globalThis.fetch = originalFetch;

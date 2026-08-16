@@ -98,6 +98,17 @@ test("requests GitHub Device Flow with read-only user access", async () => {
   assert.equal(device.user_code, "ABCD-EFGH");
 });
 
+test("rejects malformed or untrusted Device Flow responses", async () => {
+  await assert.rejects(
+    requestDeviceCode("Iv1.client", async () => ({ ok: true, json: async () => ({ verification_uri: "https://github.com/login/device" }) })),
+    /invalid device code/
+  );
+  await assert.rejects(
+    requestDeviceCode("Iv1.client", async () => ({ ok: true, json: async () => ({ device_code: "device", user_code: "ABCD-EFGH", verification_uri: "https://example.com/login/device" }) })),
+    /untrusted verification URL/
+  );
+});
+
 test("polls through authorization_pending and returns the approved token", async () => {
   let calls = 0;
   const credentials = await pollForGitHubToken({ device_code: "device", expires_in: 30, interval: 5 }, "Iv1.client", {
@@ -134,6 +145,15 @@ test("reports one Device Flow poll without owning the page lifecycle", async () 
   });
 });
 
+test("marks transient GitHub polling failures as retryable", async () => {
+  await assert.rejects(
+    pollGitHubTokenOnce("device", "Iv1.client", {
+      request: async () => ({ ok: false, status: 503, json: async () => ({ message: "Service unavailable" }) })
+    }),
+    (error) => error.retryable === true && error.status === 503
+  );
+});
+
 test("refreshes an expiring Device Flow token without a client secret", async () => {
   let body;
   const credentials = await refreshGitHubToken("old-refresh", "Iv1.client", {
@@ -158,7 +178,9 @@ test("keeps GitHub authorization in the background until the account is connecte
   const alarms = new Map();
   const openedTabs = [];
   let tokenPolls = 0;
+  let viewerRequests = 0;
   let alarmCreates = 0;
+  let failNextAlarmCreate = false;
   let onAlarm;
   let onMessage;
 
@@ -172,7 +194,11 @@ test("keeps GitHub authorization in the background until the account is connecte
   globalThis.chrome = {
     alarms: {
       clear: async (name) => alarms.delete(name),
-      create: (name, value) => { alarmCreates += 1; alarms.set(name, value); },
+      create: (name, value) => {
+        if (failNextAlarmCreate) { failNextAlarmCreate = false; throw new Error("alarm unavailable"); }
+        alarmCreates += 1;
+        alarms.set(name, value);
+      },
       get: async (name) => alarms.has(name) ? { name, scheduledTime: alarms.get(name).when } : undefined,
       onAlarm: { addListener: (listener) => { onAlarm = listener; } }
     },
@@ -207,6 +233,8 @@ test("keeps GitHub authorization in the background until the account is connecte
         : ({ access_token: "approved-token", expires_in: 28800 }) };
     }
     if (url === "https://api.github.com/user") {
+      viewerRequests += 1;
+      if (viewerRequests === 1) return { ok: false, status: 503, json: async () => ({ message: "Service unavailable" }) };
       return { ok: true, json: async () => ({ login: "octocat" }) };
     }
     throw new Error(`Unexpected request: ${url}`);
@@ -264,10 +292,28 @@ test("keeps GitHub authorization in the background until the account is connecte
     assert.ok(alarms.has("github-auth-poll"));
 
     onAlarm({ name: "github-auth-poll" });
+    for (let attempt = 0; attempt < 20 && (session.githubAuthSession?.status !== "verifying" || !session.githubAuthSession?.retryCount); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    assert.equal(session.githubAuthSession.status, "verifying");
+    assert.equal(session.githubAuthSession.retryCount, 1);
+    assert.equal(tokenPolls, 2);
+    assert.equal(local.githubAuthCandidate.accessToken, "approved-token");
+    assert.equal(local.githubToken, undefined);
+
+    delete session.githubAuthSession;
+    const resumedVerification = await send({ type: "github-auth-status" });
+    assert.equal(resumedVerification.auth.status, "verifying");
+    assert.equal(session.githubAuthSession.status, "verifying");
+
+    onAlarm({ name: "github-auth-poll" });
     for (let attempt = 0; attempt < 20 && session.githubAuthSession?.status !== "connected"; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     assert.equal(session.githubAuthSession.status, "connected");
+    assert.equal(tokenPolls, 2);
+    assert.equal(viewerRequests, 2);
+    assert.equal(local.githubAuthCandidate, null);
     assert.equal(local.githubToken, "approved-token");
     assert.equal(local.githubAccountLogin, "octocat");
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -298,6 +344,20 @@ test("keeps GitHub authorization in the background until the account is connecte
     for (let attempt = 0; attempt < 20; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(local.githubToken, "approved-token");
     assert.equal(local.githubAccountLogin, "octocat");
+
+    globalThis.fetch = async (url) => {
+      if (url === "https://github.com/login/device/code") {
+        return { ok: true, json: async () => ({ device_code: "alarm-test", user_code: "QRST-UVWX", verification_uri: "https://github.com/login/device", expires_in: 900, interval: 5 }) };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    };
+    const alarmStarted = await send({ type: "github-auth-start" });
+    assert.equal(alarmStarted.auth.status, "code");
+    failNextAlarmCreate = true;
+    const alarmFailed = await send({ type: "github-auth-continue" });
+    assert.equal(alarmFailed.ok, false);
+    assert.equal(session.githubAuthSession.status, "code");
+    assert.equal(session.githubAuthSession.tabOpening, false);
   } finally {
     globalThis.chrome = originalChrome;
     globalThis.fetch = originalFetch;

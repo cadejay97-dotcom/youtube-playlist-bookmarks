@@ -4,7 +4,8 @@
   "version": "1.1.1",
   "description": "Mirror YouTube playlists and GitHub Lists as organized Chrome bookmarks.",
   "permissions": ["bookmarks", "storage", "alarms"],
-  "host_permissions": ["https://www.youtube.com/*", "https://github.com/*", "https://api.github.com/*"],
+  "host_permissions": ["https://www.youtube.com/*"],
+  "optional_host_permissions": ["https://github.com/*", "https://api.github.com/*"],
   "background": {
     "service_worker": "src/background.js",
     "type": "module"

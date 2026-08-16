@@ -42,19 +42,32 @@ $("#settings").addEventListener("click", () => chrome.runtime.openOptionsPage())
 $("#youtube-sync").addEventListener("click", async () => {
   const button = $("#youtube-sync");
   button.disabled = true; button.textContent = "Syncing...";
-  const response = await chrome.runtime.sendMessage({ type: "youtube-sync-now" });
-  button.disabled = false; button.textContent = "Sync YouTube";
-  if (!response.ok) $("#youtube-status").textContent = response.error;
-  await render();
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "youtube-sync-now" });
+    if (!response?.ok) throw new Error(response?.error || "YouTube sync did not respond.");
+    await render();
+  } catch (error) {
+    $("#youtube-status").textContent = error.message;
+  } finally {
+    button.disabled = false; button.textContent = "Sync YouTube";
+  }
 });
 $("#github-sync").addEventListener("click", async () => {
   const settings = { ...DEFAULT_SETTINGS, ...(await chrome.storage.local.get(DEFAULT_SETTINGS)) };
   if (!settings.githubToken || !settings.githubRootFolderId) { chrome.runtime.openOptionsPage(); return; }
   const button = $("#github-sync");
   button.disabled = true; button.textContent = "Syncing...";
-  const response = await chrome.runtime.sendMessage({ type: "github-sync-now" });
-  button.disabled = false; button.textContent = "Sync GitHub Lists";
-  if (!response.ok) $("#github-status").textContent = response.error;
-  await render();
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "github-sync-now" });
+    if (!response?.ok) throw new Error(response?.error || "GitHub sync did not respond.");
+    await render();
+  } catch (error) {
+    $("#github-status").textContent = error.message;
+  } finally {
+    button.disabled = false; button.textContent = "Sync GitHub Lists";
+  }
 });
-render();
+render().catch((error) => {
+  $("#youtube-status").textContent = `Extension state could not load: ${error.message}`;
+  $("#github-status").textContent = `Extension state could not load: ${error.message}`;
+});

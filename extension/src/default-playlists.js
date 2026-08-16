@@ -32,6 +32,7 @@ export const DEFAULT_PLAYLISTS = [
 ];
 
 export const DEFAULT_SETTINGS = {
+  schemaVersion: 2,
   rootFolderId: null,
   playlists: DEFAULT_PLAYLISTS,
   playlistContainerName: "播放清单",
@@ -43,6 +44,7 @@ export const DEFAULT_SETTINGS = {
   lastResult: null,
   lastAttempt: null,
   githubRootFolderId: null,
+  githubIncludePrivateLists: false,
   githubContainerName: "项目清单",
   githubContainerId: null,
   githubToken: null,
@@ -50,6 +52,7 @@ export const DEFAULT_SETTINGS = {
   githubTokenExpiresAt: null,
   githubRefreshTokenExpiresAt: null,
   githubAccountLogin: null,
+  githubAuthState: "idle",
   githubListFolderIds: {},
   githubManagedBookmarks: {},
   githubLastSync: null,

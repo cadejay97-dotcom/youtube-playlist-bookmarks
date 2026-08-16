@@ -2,6 +2,22 @@ function folderPath(node, parents) {
   return [...parents, node.title || "Bookmarks"].filter(Boolean).join(" / ");
 }
 
+function isBookmarkNotFound(error) {
+  const message = String(error?.message || error || "");
+  return /(?:can't|cannot) find bookmark|no bookmark (?:with|for)|bookmark .*not found|bookmark .*does not exist/i.test(message);
+}
+
+async function getBookmark(id) {
+  if (!id) return null;
+  try {
+    const [bookmark] = await chrome.bookmarks.get(id);
+    return bookmark || null;
+  } catch (error) {
+    if (isBookmarkNotFound(error)) return null;
+    throw error;
+  }
+}
+
 export async function listFolders() {
   const tree = await chrome.bookmarks.getTree();
   const folders = [];
@@ -15,7 +31,7 @@ export async function listFolders() {
 
 export async function ensureFolder(parentId, title, knownId) {
   if (knownId) {
-    const [folder] = await chrome.bookmarks.get(knownId).catch(() => []);
+    const folder = await getBookmark(knownId);
     if (folder?.parentId === parentId && !folder.url) {
       if (folder.title !== title) await chrome.bookmarks.update(folder.id, { title });
       return folder.id;
@@ -24,6 +40,27 @@ export async function ensureFolder(parentId, title, knownId) {
   const children = await chrome.bookmarks.getChildren(parentId);
   const existing = children.find((child) => !child.url && child.title === title);
   return existing ? existing.id : (await chrome.bookmarks.create({ parentId, title })).id;
+}
+
+export async function archiveManagedFolder(folderId, managed = {}) {
+  const folder = await getBookmark(folderId);
+  if (!folder || folder.url) return { removed: 0, archived: false, deleted: false };
+  let removed = 0;
+  for (const bookmarkId of Object.values(managed)) {
+    const bookmark = await getBookmark(bookmarkId);
+    if (bookmark?.parentId !== folder.id) continue;
+    await chrome.bookmarks.remove(bookmark.id);
+    removed += 1;
+  }
+  const children = await chrome.bookmarks.getChildren(folder.id);
+  if (!children.length) {
+    await chrome.bookmarks.remove(folder.id);
+    return { removed, archived: false, deleted: true };
+  }
+  if (!folder.title.startsWith("[Archived] ")) {
+    await chrome.bookmarks.update(folder.id, { title: `[Archived] ${folder.title}` });
+  }
+  return { removed, archived: true, deleted: false };
 }
 
 export async function mirrorPlaylist({ rootFolderId, playlist, folderId, managed = {}, onProgress }) {
@@ -36,7 +73,7 @@ export async function mirrorPlaylist({ rootFolderId, playlist, folderId, managed
 
   for (const video of playlist.videos) {
     const existingId = managed[video.id];
-    const [existing] = existingId ? await chrome.bookmarks.get(existingId).catch(() => []) : [];
+    const existing = await getBookmark(existingId);
     if (existing?.parentId === resolvedFolderId) {
       if (existing.title !== video.title || existing.url !== video.url) {
         await chrome.bookmarks.update(existing.id, { title: video.title, url: video.url });
@@ -60,7 +97,7 @@ export async function mirrorPlaylist({ rootFolderId, playlist, folderId, managed
 
   for (const [videoId, bookmarkId] of Object.entries(managed)) {
     if (nextManaged[videoId]) continue;
-    const [bookmark] = await chrome.bookmarks.get(bookmarkId).catch(() => []);
+    const bookmark = await getBookmark(bookmarkId);
     if (bookmark?.parentId === resolvedFolderId) {
       await chrome.bookmarks.remove(bookmarkId);
       removed += 1;

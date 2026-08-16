@@ -49,7 +49,9 @@ GitHub Lists must be authorized by GitHub. A Google identity alone cannot grant 
 2. A GitHub page opens in the already signed-in browser. Enter the displayed one-time code and authorize the extension.
 3. Return to Settings, choose a separate **GitHub project bookmark folder**, click **Save settings**, and click **Sync GitHub Lists**.
 
-The authorization asks GitHub for the read-only `read:user` scope used to identify the account and read its Lists. The public OAuth client ID is built into the extension; no client secret is included. Access and refresh tokens remain only in local extension storage and are renewed automatically. **Disconnect** deletes them without removing bookmarks already synchronized.
+The authorization asks GitHub for the read-only `read:user` scope used to identify the account and read its Lists. The public OAuth client ID is built into the extension; no client secret is included. GitHub host access is requested only when you click **Connect GitHub**. Access and refresh tokens remain in trusted extension-local storage and are renewed automatically.
+
+Private GitHub Lists are excluded by default. Enabling **Include private GitHub Lists** copies their names and repository links into ordinary Chrome bookmarks, which Chrome Sync may copy to your other signed-in devices. **Forget on this device** deletes local credentials without removing synchronized bookmarks or revoking the OAuth grant; use GitHub's Authorized OAuth Apps settings to revoke the grant itself.
 
 ## Configure With An Agent
 

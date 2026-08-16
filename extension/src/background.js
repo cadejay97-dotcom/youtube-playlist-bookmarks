@@ -1,5 +1,5 @@
 import { DEFAULT_SETTINGS } from "./default-playlists.js";
-import { ensureFolder, mirrorPlaylist } from "./bookmarks.js";
+import { archiveManagedFolder, ensureFolder, mirrorPlaylist } from "./bookmarks.js";
 import { fetchPlaylist } from "./youtube.js";
 import { syncGitHubLists } from "./github-sync.js";
 import { pollGitHubTokenOnce, requestDeviceCode } from "./github-auth.js";
@@ -9,6 +9,7 @@ import { GITHUB_OAUTH_CLIENT_ID } from "./github-config.js";
 const ALARM_NAME = "playlist-bookmark-sync";
 const GITHUB_AUTH_ALARM_NAME = "github-auth-poll";
 const GITHUB_AUTH_SESSION_KEY = "githubAuthSession";
+const GITHUB_AUTH_CANDIDATE_KEY = "githubAuthCandidate";
 let githubAuthStartPromise = null;
 let githubAuthTransition = Promise.resolve();
 let githubAuthPollPromise = null;
@@ -19,9 +20,26 @@ async function getSettings() {
   return { ...DEFAULT_SETTINGS, ...stored };
 }
 
+async function initializeStorage() {
+  const stored = await chrome.storage.local.get();
+  const updates = {};
+  if (stored.schemaVersion !== DEFAULT_SETTINGS.schemaVersion) updates.schemaVersion = DEFAULT_SETTINGS.schemaVersion;
+  if (!Array.isArray(stored.playlists)) updates.playlists = DEFAULT_SETTINGS.playlists;
+  for (const key of ["managedBookmarks", "playlistFolderIds", "githubListFolderIds", "githubManagedBookmarks"]) {
+    if (!stored[key] || typeof stored[key] !== "object" || Array.isArray(stored[key])) updates[key] = {};
+  }
+  if (typeof stored.githubIncludePrivateLists !== "boolean") updates.githubIncludePrivateLists = false;
+  if (typeof stored.githubAuthState !== "string") updates.githubAuthState = stored.githubToken ? "connected" : "idle";
+  if (Object.keys(updates).length) await chrome.storage.local.set(updates);
+  await chrome.storage.local.setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" });
+}
+
 async function scheduleSync(interval) {
   await chrome.alarms.clear(ALARM_NAME);
-  chrome.alarms.create(ALARM_NAME, { periodInMinutes: Math.max(1, Number(interval) || 1) });
+  await chrome.alarms.create(ALARM_NAME, { periodInMinutes: Math.max(1, Number(interval) || 1) });
+  const alarm = await chrome.alarms.get(ALARM_NAME);
+  if (!alarm) throw new Error("Chrome could not schedule automatic bookmark sync.");
+  await chrome.storage.local.set({ automaticSyncSchedule: { status: "scheduled", intervalMinutes: Math.max(1, Number(interval) || 1), checkedAt: new Date().toISOString() } });
 }
 
 export function runProviderSync(provider, trigger, task) {
@@ -72,6 +90,7 @@ function publicGitHubAuth(session) {
     verificationUri: session.verificationUri || null,
     expiresAt: session.expiresAt || null,
     accountLogin: session.accountLogin || null,
+    transientError: session.transientError || null,
     error: session.error || null
   };
 }
@@ -86,6 +105,17 @@ async function setGitHubAuthSession(session) {
   return publicGitHubAuth(session);
 }
 
+async function getGitHubAuthCandidate() {
+  const stored = await chrome.storage.local.get(GITHUB_AUTH_CANDIDATE_KEY);
+  return stored[GITHUB_AUTH_CANDIDATE_KEY] || null;
+}
+
+async function clearGitHubAuthCandidate(attemptId = null) {
+  const candidate = await getGitHubAuthCandidate();
+  if (!candidate || (attemptId && candidate.attemptId !== attemptId)) return;
+  await chrome.storage.local.set({ [GITHUB_AUTH_CANDIDATE_KEY]: null });
+}
+
 function runGitHubAuthTransition(task) {
   const next = githubAuthTransition.then(task, task);
   githubAuthTransition = next.catch(() => undefined);
@@ -98,7 +128,7 @@ async function activeGitHubAuthAttempt(attemptId, statuses = ["pending"]) {
 }
 
 async function scheduleGitHubAuthAlarm(when) {
-  chrome.alarms.create(GITHUB_AUTH_ALARM_NAME, { when });
+  await chrome.alarms.create(GITHUB_AUTH_ALARM_NAME, { when });
   const alarm = await chrome.alarms.get(GITHUB_AUTH_ALARM_NAME);
   if (!alarm) throw new Error("Chrome could not schedule GitHub sign-in. Start again.");
   return alarm;
@@ -106,10 +136,37 @@ async function scheduleGitHubAuthAlarm(when) {
 
 async function recoverGitHubAuthorization() {
   return runGitHubAuthTransition(async () => {
-    const session = await getGitHubAuthSession();
-    if (!session || session.status !== "pending") return session;
-    if (session.expiresAt <= Date.now()) {
+    let session = await getGitHubAuthSession();
+    const candidate = await getGitHubAuthCandidate();
+    if (!session && candidate?.attemptId) {
+      if (Number(candidate.verificationExpiresAt) <= Date.now()) {
+        await clearGitHubAuthCandidate(candidate.attemptId);
+        return null;
+      }
+      session = {
+        status: "verifying",
+        attemptId: candidate.attemptId,
+        verificationExpiresAt: candidate.verificationExpiresAt,
+        retryCount: 0,
+        transientError: null
+      };
+      await setGitHubAuthSession(session);
+    }
+    if (!session || !["pending", "verifying"].includes(session.status)) return session;
+    if (session.status === "pending" && candidate?.attemptId === session.attemptId) {
+      session = {
+        ...session,
+        status: "verifying",
+        verificationExpiresAt: candidate.verificationExpiresAt || (Date.now() + 300_000),
+        retryCount: 0,
+        transientError: null
+      };
+      await setGitHubAuthSession(session);
+    }
+    const phaseExpiresAt = session.status === "verifying" ? session.verificationExpiresAt : session.expiresAt;
+    if (phaseExpiresAt <= Date.now()) {
       await chrome.alarms.clear(GITHUB_AUTH_ALARM_NAME);
+      await clearGitHubAuthCandidate(session.attemptId);
       return setGitHubAuthSession({ status: "failed", attemptId: session.attemptId, error: "The GitHub code expired. Start again." });
     }
     const alarm = await chrome.alarms.get(GITHUB_AUTH_ALARM_NAME);
@@ -124,9 +181,15 @@ async function recoverGitHubAuthorization() {
 
 async function githubAuthStatus() {
   let session = await getGitHubAuthSession();
-  if (session?.status === "pending") session = await recoverGitHubAuthorization();
-  if (session && ["code", "pending", "failed"].includes(session.status)) return publicGitHubAuth(session);
-  const account = await chrome.storage.local.get(["githubToken", "githubAccountLogin"]);
+  const candidate = await getGitHubAuthCandidate();
+  if (["pending", "verifying"].includes(session?.status) || (!session && candidate?.attemptId)) {
+    session = await recoverGitHubAuthorization();
+  }
+  const account = await chrome.storage.local.get(["githubToken", "githubAccountLogin", "githubAuthAttemptId"]);
+  if (account.githubToken && account.githubAccountLogin && session?.attemptId === account.githubAuthAttemptId) {
+    return { status: "connected", accountLogin: account.githubAccountLogin };
+  }
+  if (session && ["requesting", "code", "pending", "verifying", "failed"].includes(session.status)) return publicGitHubAuth(session);
   if (account.githubToken && account.githubAccountLogin) {
     return { status: "connected", accountLogin: account.githubAccountLogin };
   }
@@ -139,9 +202,19 @@ async function startGitHubAuthorization() {
     const attemptId = crypto.randomUUID();
     await runGitHubAuthTransition(async () => {
       await chrome.alarms.clear(GITHUB_AUTH_ALARM_NAME);
+      await clearGitHubAuthCandidate();
       await setGitHubAuthSession({ status: "requesting", attemptId });
     });
-    const device = await requestDeviceCode(GITHUB_OAUTH_CLIENT_ID);
+    let device;
+    try {
+      device = await requestDeviceCode(GITHUB_OAUTH_CLIENT_ID);
+    } catch (error) {
+      await runGitHubAuthTransition(async () => {
+        if (!await activeGitHubAuthAttempt(attemptId, ["requesting"])) return;
+        await setGitHubAuthSession({ status: "failed", attemptId, error: error.message });
+      });
+      throw error;
+    }
     const now = Date.now();
     return runGitHubAuthTransition(async () => {
       const active = await activeGitHubAuthAttempt(attemptId, ["requesting"]);
@@ -177,7 +250,12 @@ async function continueGitHubAuthorization() {
     const nextPollAt = Date.now() + (session.intervalSeconds * 1000);
     const pending = { ...session, status: "pending", nextPollAt, tabOpening: true, tabOpened: false };
     await setGitHubAuthSession(pending);
-    await scheduleGitHubAuthAlarm(nextPollAt);
+    try {
+      await scheduleGitHubAuthAlarm(nextPollAt);
+    } catch (error) {
+      await setGitHubAuthSession({ ...session, status: "code", nextPollAt: null, tabOpening: false, tabOpened: false, error: error.message });
+      throw error;
+    }
     return pending;
   });
   if (!shouldOpenTab) return publicGitHubAuth(pendingSession);
@@ -204,6 +282,7 @@ async function cancelGitHubAuthorization() {
     const session = await getGitHubAuthSession();
     await chrome.alarms.clear(GITHUB_AUTH_ALARM_NAME);
     await chrome.storage.session.remove(GITHUB_AUTH_SESSION_KEY);
+    await clearGitHubAuthCandidate(session?.attemptId);
     if (session?.attemptId) {
       const stored = await chrome.storage.local.get(["githubAuthAttemptId"]);
       if (stored.githubAuthAttemptId === session.attemptId) {
@@ -213,6 +292,7 @@ async function cancelGitHubAuthorization() {
           githubTokenExpiresAt: null,
           githubRefreshTokenExpiresAt: null,
           githubAccountLogin: null,
+          githubAuthState: "idle",
           githubAuthAttemptId: null
         });
       }
@@ -226,11 +306,13 @@ async function disconnectGitHub() {
     await chrome.alarms.clear(GITHUB_AUTH_ALARM_NAME);
     await chrome.storage.session.remove(GITHUB_AUTH_SESSION_KEY);
     await chrome.storage.local.set({
+      [GITHUB_AUTH_CANDIDATE_KEY]: null,
       githubToken: null,
       githubRefreshToken: null,
       githubTokenExpiresAt: null,
       githubRefreshTokenExpiresAt: null,
       githubAccountLogin: null,
+      githubAuthState: "idle",
       githubAuthAttemptId: null,
       githubLastResult: null,
       githubLastSync: null
@@ -241,41 +323,82 @@ async function disconnectGitHub() {
 
 async function pollGitHubAuthorizationRun() {
   const session = await runGitHubAuthTransition(async () => {
-    const active = await getGitHubAuthSession();
-    if (!active || active.status !== "pending") return null;
+    let active = await getGitHubAuthSession();
+    if (!active || !["pending", "verifying"].includes(active.status)) return null;
+    const candidate = await getGitHubAuthCandidate();
+    if (active.status === "pending" && candidate?.attemptId === active.attemptId) {
+      active = {
+        ...active,
+        status: "verifying",
+        verificationExpiresAt: candidate.verificationExpiresAt || (Date.now() + 300_000),
+        retryCount: 0,
+        transientError: null
+      };
+    }
     const pollLeaseUntil = Date.now() + 30_000;
     await scheduleGitHubAuthAlarm(pollLeaseUntil);
     await setGitHubAuthSession({ ...active, pollLeaseUntil });
     return { ...active, pollLeaseUntil };
   });
-  if (!session || session.status !== "pending") return;
-  if (session.expiresAt <= Date.now()) {
+  if (!session || !["pending", "verifying"].includes(session.status)) return;
+  const phaseExpiresAt = session.status === "verifying" ? session.verificationExpiresAt : session.expiresAt;
+  if (phaseExpiresAt <= Date.now()) {
     await runGitHubAuthTransition(async () => {
-      if (!await activeGitHubAuthAttempt(session.attemptId)) return;
+      if (!await activeGitHubAuthAttempt(session.attemptId, [session.status])) return;
       await chrome.alarms.clear(GITHUB_AUTH_ALARM_NAME);
+      await clearGitHubAuthCandidate(session.attemptId);
       await setGitHubAuthSession({ status: "failed", attemptId: session.attemptId, error: "The GitHub code expired. Start again." });
     });
     return;
   }
   try {
-    const result = await pollGitHubTokenOnce(session.deviceCode, GITHUB_OAUTH_CLIENT_ID);
-    if (!await activeGitHubAuthAttempt(session.attemptId)) return;
-    if (result.status === "authorized") {
-      const viewer = await fetchGitHubViewer(result.credentials.accessToken);
+    if (session.status === "verifying") {
+      const candidate = await getGitHubAuthCandidate();
+      if (!candidate || candidate.attemptId !== session.attemptId || !candidate.accessToken) {
+        throw new Error("GitHub authorization verification state was lost. Start again.");
+      }
+      const viewer = await fetchGitHubViewer(candidate.accessToken);
       await runGitHubAuthTransition(async () => {
-        if (!await activeGitHubAuthAttempt(session.attemptId)) return;
+        if (!await activeGitHubAuthAttempt(session.attemptId, ["verifying"])) return;
+        const currentCandidate = await getGitHubAuthCandidate();
+        if (currentCandidate?.attemptId !== session.attemptId) return;
         await chrome.storage.local.set({
-          githubToken: result.credentials.accessToken,
-          githubRefreshToken: result.credentials.refreshToken,
-          githubTokenExpiresAt: result.credentials.expiresAt,
-          githubRefreshTokenExpiresAt: result.credentials.refreshTokenExpiresAt,
+          [GITHUB_AUTH_CANDIDATE_KEY]: null,
+          githubToken: currentCandidate.accessToken,
+          githubRefreshToken: currentCandidate.refreshToken,
+          githubTokenExpiresAt: currentCandidate.expiresAt,
+          githubRefreshTokenExpiresAt: currentCandidate.refreshTokenExpiresAt,
           githubAccountLogin: viewer.login,
+          githubAuthState: "connected",
           githubAuthAttemptId: session.attemptId
         });
-        if (!await activeGitHubAuthAttempt(session.attemptId)) return;
         await chrome.alarms.clear(GITHUB_AUTH_ALARM_NAME);
         await setGitHubAuthSession({ status: "connected", accountLogin: viewer.login, attemptId: session.attemptId, completedAt: Date.now() });
       });
+      return;
+    }
+    const result = await pollGitHubTokenOnce(session.deviceCode, GITHUB_OAUTH_CLIENT_ID);
+    if (!await activeGitHubAuthAttempt(session.attemptId)) return;
+    if (result.status === "authorized") {
+      await runGitHubAuthTransition(async () => {
+        if (!await activeGitHubAuthAttempt(session.attemptId)) return;
+        const verificationExpiresAt = Date.now() + 300_000;
+        await chrome.storage.local.set({
+          [GITHUB_AUTH_CANDIDATE_KEY]: {
+            attemptId: session.attemptId,
+            ...result.credentials,
+            verificationExpiresAt
+          }
+        });
+        await setGitHubAuthSession({
+          status: "verifying",
+          attemptId: session.attemptId,
+          verificationExpiresAt,
+          retryCount: 0,
+          transientError: null
+        });
+      });
+      await pollGitHubAuthorizationRun();
       return;
     }
     const intervalSeconds = result.status === "slow_down"
@@ -283,15 +406,34 @@ async function pollGitHubAuthorizationRun() {
       : session.intervalSeconds;
     const nextPollAt = Date.now() + (intervalSeconds * 1000);
     await runGitHubAuthTransition(async () => {
-      const active = await activeGitHubAuthAttempt(session.attemptId);
+      const active = await activeGitHubAuthAttempt(session.attemptId, [session.status]);
       if (!active) return;
       await setGitHubAuthSession({ ...active, status: "pending", intervalSeconds, nextPollAt, pollLeaseUntil: null });
       await scheduleGitHubAuthAlarm(nextPollAt);
     });
   } catch (error) {
     await runGitHubAuthTransition(async () => {
-      if (!await activeGitHubAuthAttempt(session.attemptId)) return;
+      const active = await activeGitHubAuthAttempt(session.attemptId, [session.status]);
+      if (!active) return;
+      const retryCount = (Number(active.retryCount) || 0) + 1;
+      const retryable = error?.retryable === true || error?.name === "TypeError";
+      const retryDelay = Math.min(60, Math.max(active.intervalSeconds || 5, 5) * (2 ** Math.min(retryCount - 1, 3)));
+      const nextPollAt = Date.now() + (retryDelay * 1000);
+      const activeExpiresAt = active.status === "verifying" ? active.verificationExpiresAt : active.expiresAt;
+      if (retryable && retryCount <= 5 && nextPollAt < activeExpiresAt) {
+        await scheduleGitHubAuthAlarm(nextPollAt);
+        await setGitHubAuthSession({
+          ...active,
+          status: active.status,
+          retryCount,
+          nextPollAt,
+          pollLeaseUntil: null,
+          transientError: error.message
+        });
+        return;
+      }
       await chrome.alarms.clear(GITHUB_AUTH_ALARM_NAME);
+      await clearGitHubAuthCandidate(session.attemptId);
       await setGitHubAuthSession({ status: "failed", attemptId: session.attemptId, error: error.message });
     });
   }
@@ -344,7 +486,19 @@ export async function syncAll() {
       result.failed.push({ id: playlist.id, title: playlist.title, error: error.message });
     }
   }
-  result.success = result.ok.length > 0 && result.failed.length === 0;
+  const configuredIds = new Set(settings.playlists.map((playlist) => playlist.id));
+  for (const staleId of Object.keys(nextFolders)) {
+    if (configuredIds.has(staleId)) continue;
+    const archived = await archiveManagedFolder(nextFolders[staleId], nextManaged[staleId]);
+    result.removed += archived.removed;
+    delete nextFolders[staleId];
+    delete nextManaged[staleId];
+    await chrome.storage.local.set({
+      playlistFolderIds: { ...nextFolders },
+      managedBookmarks: { ...nextManaged }
+    });
+  }
+  result.success = result.failed.length === 0;
   await chrome.storage.local.set({
     playlistFolderIds: nextFolders,
     playlistContainerId: containerFolderId,
@@ -352,22 +506,34 @@ export async function syncAll() {
     lastSync: result.at,
     lastResult: result
   });
-  if (!result.ok.length) throw new Error(result.failed.map((item) => `${item.title}: ${item.error}`).join(" "));
+  if (!result.ok.length && result.failed.length) throw new Error(result.failed.map((item) => `${item.title}: ${item.error}`).join(" "));
   return result;
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
-  const stored = await chrome.storage.local.get();
-  if (!stored.playlists) await chrome.storage.local.set(DEFAULT_SETTINGS);
-  await scheduleSync(stored.syncIntervalMinutes || DEFAULT_SETTINGS.syncIntervalMinutes);
+  try {
+    await initializeStorage();
+    const stored = await chrome.storage.local.get();
+    await scheduleSync(stored.syncIntervalMinutes || DEFAULT_SETTINGS.syncIntervalMinutes);
+  } catch (error) {
+    console.error("Extension initialization failed", error);
+    await chrome.storage.local.set({ automaticSyncSchedule: { status: "failed", error: error.message, checkedAt: new Date().toISOString() } });
+  }
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.syncIntervalMinutes) scheduleSync(changes.syncIntervalMinutes.newValue);
+  if (area === "local" && changes.syncIntervalMinutes) {
+    scheduleSync(changes.syncIntervalMinutes.newValue).catch(async (error) => {
+      console.error("Automatic sync scheduling failed", error);
+      await chrome.storage.local.set({ automaticSyncSchedule: { status: "failed", error: error.message, checkedAt: new Date().toISOString() } });
+    });
+  }
 });
 
 chrome.runtime.onStartup?.addListener(() => {
-  recoverGitHubAuthorization().catch((error) => console.error("GitHub sign-in recovery failed", error));
+  initializeStorage()
+    .then(() => recoverGitHubAuthorization())
+    .catch((error) => console.error("GitHub sign-in recovery failed", error));
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ensureFolder, mirrorPlaylist } from "../extension/src/bookmarks.js";
+import { archiveManagedFolder, ensureFolder, mirrorPlaylist } from "../extension/src/bookmarks.js";
 
 function createBookmarksMock() {
   let nextId = 10;
@@ -89,4 +89,34 @@ test("checkpoints created bookmarks so retry converges after a partial failure",
   });
   assert.equal(retried.created, 1);
   assert.deepEqual(mock.children.get(checkpoint.folderId).map((id) => mock.nodes.get(id).title), ["A", "B"]);
+});
+
+test("archives a removed source without deleting manual bookmarks", async () => {
+  const mock = createBookmarksMock();
+  globalThis.chrome = { bookmarks: mock.bookmarkApi };
+  const containerId = await ensureFolder("1", "播放清单");
+  const mirrored = await mirrorPlaylist({ rootFolderId: containerId, playlist: playlist([video("a", "A")]) });
+  const manual = await mock.bookmarkApi.create({ parentId: mirrored.folderId, title: "Manual", url: "https://example.com" });
+  const result = await archiveManagedFolder(mirrored.folderId, mirrored.managed);
+  assert.deepEqual(result, { removed: 1, archived: true, deleted: false });
+  assert.equal(mock.nodes.get(mirrored.folderId).title, "[Archived] Living in the vibe.");
+  assert.ok(mock.nodes.has(manual.id));
+});
+
+test("does not create duplicates when bookmark lookup infrastructure fails", async () => {
+  const mock = createBookmarksMock();
+  globalThis.chrome = { bookmarks: mock.bookmarkApi };
+  const containerId = await ensureFolder("1", "播放清单");
+  const initial = await mirrorPlaylist({ rootFolderId: containerId, playlist: playlist([video("a", "A")]) });
+  const originalGet = mock.bookmarkApi.get;
+  mock.bookmarkApi.get = async (id) => {
+    if (String(id) === initial.managed.a) throw new Error("Chrome bookmark service unavailable");
+    return originalGet(id);
+  };
+  const childCount = mock.children.get(initial.folderId).length;
+  await assert.rejects(
+    mirrorPlaylist({ rootFolderId: containerId, folderId: initial.folderId, managed: initial.managed, playlist: playlist([video("a", "A")]) }),
+    /bookmark service unavailable/
+  );
+  assert.equal(mock.children.get(initial.folderId).length, childCount);
 });
