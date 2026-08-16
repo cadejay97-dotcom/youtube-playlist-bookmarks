@@ -2,6 +2,7 @@ import { DEFAULT_SETTINGS } from "./default-playlists.js";
 import { listFolders } from "./bookmarks.js";
 import { requestDeviceCode, pollForGitHubToken } from "./github-auth.js";
 import { fetchGitHubViewer } from "./github.js";
+import { GITHUB_OAUTH_CLIENT_ID } from "./github-config.js";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -43,8 +44,7 @@ async function saveSettings({ showFeedback = true } = {}) {
     rootFolderId: $("#folder").value || null,
     playlists: collectYouTubePlaylists(),
     syncIntervalMinutes: Number($("#interval").value),
-    githubRootFolderId: $("#github-folder").value || null,
-    githubClientId: $("#github-client-id").value.trim()
+    githubRootFolderId: $("#github-folder").value || null
   });
   if (showFeedback) {
     $("#saved").textContent = "Settings saved.";
@@ -58,7 +58,6 @@ async function load() {
   populateFolderSelect($("#folder"), folders, settings.rootFolderId, "No YouTube destination selected");
   populateFolderSelect($("#github-folder"), folders, settings.githubRootFolderId, "No GitHub destination selected");
   $("#interval").value = String(settings.syncIntervalMinutes);
-  $("#github-client-id").value = settings.githubClientId || "";
   settings.playlists.forEach(addPlaylist);
   updateGitHubConnection(settings);
 }
@@ -67,22 +66,27 @@ $("#add").addEventListener("click", () => addPlaylist());
 $("#save").addEventListener("click", () => saveSettings());
 
 $("#github-connect").addEventListener("click", async () => {
-  const clientId = $("#github-client-id").value.trim();
   const feedback = $("#github-feedback");
   const deviceLine = $("#github-device");
   feedback.textContent = "";
   deviceLine.hidden = true;
   try {
     await saveSettings({ showFeedback: false });
-    const device = await requestDeviceCode(clientId);
+    const device = await requestDeviceCode(GITHUB_OAUTH_CLIENT_ID);
     deviceLine.textContent = `Enter code ${device.user_code} at ${device.verification_uri}`;
     deviceLine.hidden = false;
     await chrome.tabs.create({ url: device.verification_uri });
     feedback.textContent = "Waiting for GitHub authorization...";
-    const token = await pollForGitHubToken(device, clientId);
-    const viewer = await fetchGitHubViewer(token);
-    await chrome.storage.local.set({ githubToken: token, githubAccountLogin: viewer.login });
-    updateGitHubConnection({ githubToken: token, githubAccountLogin: viewer.login });
+    const credentials = await pollForGitHubToken(device, GITHUB_OAUTH_CLIENT_ID);
+    const viewer = await fetchGitHubViewer(credentials.accessToken);
+    await chrome.storage.local.set({
+      githubToken: credentials.accessToken,
+      githubRefreshToken: credentials.refreshToken,
+      githubTokenExpiresAt: credentials.expiresAt,
+      githubRefreshTokenExpiresAt: credentials.refreshTokenExpiresAt,
+      githubAccountLogin: viewer.login
+    });
+    updateGitHubConnection({ githubToken: credentials.accessToken, githubAccountLogin: viewer.login });
     feedback.textContent = `Connected as @${viewer.login}. Choose a destination, save, then sync.`;
   } catch (error) {
     feedback.textContent = error.message;
@@ -90,7 +94,15 @@ $("#github-connect").addEventListener("click", async () => {
 });
 
 $("#github-disconnect").addEventListener("click", async () => {
-  await chrome.storage.local.set({ githubToken: null, githubAccountLogin: null, githubLastResult: null, githubLastSync: null });
+  await chrome.storage.local.set({
+    githubToken: null,
+    githubRefreshToken: null,
+    githubTokenExpiresAt: null,
+    githubRefreshTokenExpiresAt: null,
+    githubAccountLogin: null,
+    githubLastResult: null,
+    githubLastSync: null
+  });
   updateGitHubConnection({});
   $("#github-feedback").textContent = "GitHub disconnected. Existing bookmarks were not changed.";
 });

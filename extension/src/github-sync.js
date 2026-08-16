@@ -1,18 +1,34 @@
 import { DEFAULT_SETTINGS } from "./default-playlists.js";
 import { ensureFolder, mirrorPlaylist } from "./bookmarks.js";
 import { fetchGitHubLists } from "./github.js";
+import { refreshGitHubToken } from "./github-auth.js";
+import { GITHUB_OAUTH_CLIENT_ID } from "./github-config.js";
 
 async function getSettings() {
   const stored = await chrome.storage.local.get(DEFAULT_SETTINGS);
   return { ...DEFAULT_SETTINGS, ...stored };
 }
 
+async function validGitHubToken(settings) {
+  if (!settings.githubToken) throw new Error("Connect GitHub in Settings before syncing Lists.");
+  if (!settings.githubTokenExpiresAt || Number(settings.githubTokenExpiresAt) > Date.now() + 60_000) return settings.githubToken;
+  if (settings.githubRefreshTokenExpiresAt && Number(settings.githubRefreshTokenExpiresAt) <= Date.now()) {
+    throw new Error("GitHub authorization expired. Connect GitHub again.");
+  }
+  const credentials = await refreshGitHubToken(settings.githubRefreshToken, GITHUB_OAUTH_CLIENT_ID);
+  await chrome.storage.local.set({
+    githubToken: credentials.accessToken,
+    githubRefreshToken: credentials.refreshToken,
+    githubTokenExpiresAt: credentials.expiresAt,
+    githubRefreshTokenExpiresAt: credentials.refreshTokenExpiresAt
+  });
+  return credentials.accessToken;
+}
+
 export async function syncGitHubLists() {
   const settings = await getSettings();
   if (!settings.githubRootFolderId) throw new Error("Choose a GitHub project destination folder in Settings before syncing.");
-  if (!settings.githubToken) throw new Error("Connect GitHub in Settings before syncing Lists.");
-
-  const source = await fetchGitHubLists(settings.githubToken);
+  const source = await fetchGitHubLists(await validGitHubToken(settings));
   const result = { ok: [], failed: [], created: 0, updated: 0, removed: 0, at: new Date().toISOString() };
   const nextFolders = { ...settings.githubListFolderIds };
   const nextManaged = { ...settings.githubManagedBookmarks };

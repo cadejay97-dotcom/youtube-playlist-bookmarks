@@ -11,12 +11,21 @@ async function readJson(response) {
   return payload;
 }
 
+function tokenCredentials(payload, now = Date.now()) {
+  return {
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token || null,
+    expiresAt: payload.expires_in ? now + (Number(payload.expires_in) * 1000) : null,
+    refreshTokenExpiresAt: payload.refresh_token_expires_in ? now + (Number(payload.refresh_token_expires_in) * 1000) : null
+  };
+}
+
 export async function requestDeviceCode(clientId, request = fetch) {
   if (!clientId?.trim()) throw new Error("Enter a GitHub OAuth App client ID first.");
   const response = await request(DEVICE_CODE_URL, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
-    body: formBody({ client_id: clientId.trim(), scope: "user" })
+    body: formBody({ client_id: clientId.trim(), scope: "read:user" })
   });
   return readJson(response);
 }
@@ -38,10 +47,24 @@ export async function pollForGitHubToken(device, clientId, { request = fetch, sl
       })
     });
     const payload = await response.json().catch(() => ({}));
-    if (payload.access_token) return payload.access_token;
+    if (payload.access_token) return tokenCredentials(payload);
     if (payload.error === "authorization_pending") continue;
     if (payload.error === "slow_down") { intervalSeconds += 5; continue; }
     throw new Error(payload.error_description || payload.error || `GitHub authorization failed (${response.status}).`);
   }
   throw new Error("GitHub sign-in timed out. Start the connection again.");
+}
+
+export async function refreshGitHubToken(refreshToken, clientId, { request = fetch, now = Date.now() } = {}) {
+  if (!refreshToken) throw new Error("GitHub authorization expired. Connect GitHub again.");
+  const response = await request(ACCESS_TOKEN_URL, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+    body: formBody({
+      client_id: clientId.trim(),
+      refresh_token: refreshToken,
+      grant_type: "refresh_token"
+    })
+  });
+  return tokenCredentials(await readJson(response), now);
 }

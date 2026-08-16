@@ -10,8 +10,7 @@
       <section class="panel"><div class="section-heading"><div><h2>YouTube playlists</h2><p class="hint">A playlist folder is created only after the first successful sync.</p></div><button id="add" class="secondary">Add playlist</button></div><div id="playlist-editor"></div></section>
 
       <section class="panel github-panel"><div class="section-heading"><div><h2>GitHub Lists</h2><p class="hint">GitHub Lists sync independently into a "项目清单" folder.</p></div><span id="github-account" class="connection-state">Not connected</span></div>
-        <label for="github-client-id">GitHub OAuth App client ID</label><input id="github-client-id" autocomplete="off" placeholder="Iv1...">
-        <p class="hint">Create a GitHub OAuth App with Device Flow enabled, then paste its client ID here. No client secret is stored in the extension.</p>
+        <p class="hint">Click Connect GitHub, then approve this extension in your signed-in GitHub browser tab. No password, personal access token, client ID, or client secret is required.</p>
         <div class="inline-actions"><button id="github-connect" class="secondary">Connect GitHub</button><button id="github-disconnect" class="text-button" hidden>Disconnect</button></div>
         <p id="github-device" class="device-code" hidden></p>
         <label for="github-folder">GitHub project bookmark folder</label><select id="github-folder"></select>

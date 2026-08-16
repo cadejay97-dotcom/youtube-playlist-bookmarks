@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fetchGitHubLists, parseGitHubLists } from "../extension/src/github.js";
-import { pollForGitHubToken, requestDeviceCode } from "../extension/src/github-auth.js";
+import { pollForGitHubToken, refreshGitHubToken, requestDeviceCode } from "../extension/src/github-auth.js";
 
 const graphQlPayload = {
   data: {
@@ -71,26 +71,44 @@ test("paginates through GitHub Lists as well as their repository bookmarks", asy
   assert.deepEqual(requestedVariables, [{ after: null }, { after: "lists-page-2" }]);
 });
 
-test("requests GitHub Device Flow with the user scope required for Lists", async () => {
+test("requests GitHub Device Flow with read-only user access", async () => {
   let body;
   const device = await requestDeviceCode("Iv1.client", async (_url, options) => {
     body = new URLSearchParams(options.body);
     return { ok: true, json: async () => ({ device_code: "device", user_code: "ABCD-EFGH", verification_uri: "https://github.com/login/device", expires_in: 900, interval: 5 }) };
   });
   assert.equal(body.get("client_id"), "Iv1.client");
-  assert.equal(body.get("scope"), "user");
+  assert.equal(body.get("scope"), "read:user");
   assert.equal(device.user_code, "ABCD-EFGH");
 });
 
 test("polls through authorization_pending and returns the approved token", async () => {
   let calls = 0;
-  const token = await pollForGitHubToken({ device_code: "device", expires_in: 30, interval: 5 }, "Iv1.client", {
+  const credentials = await pollForGitHubToken({ device_code: "device", expires_in: 30, interval: 5 }, "Iv1.client", {
     sleep: async () => undefined,
     request: async () => {
       calls += 1;
-      return { ok: true, json: async () => calls === 1 ? { error: "authorization_pending" } : { access_token: "approved-token" } };
+      return { ok: true, json: async () => calls === 1 ? { error: "authorization_pending" } : { access_token: "approved-token", refresh_token: "refresh-token", expires_in: 28800, refresh_token_expires_in: 15897600 } };
     }
   });
   assert.equal(calls, 2);
-  assert.equal(token, "approved-token");
+  assert.equal(credentials.accessToken, "approved-token");
+  assert.equal(credentials.refreshToken, "refresh-token");
+  assert.ok(credentials.expiresAt > Date.now());
+});
+
+test("refreshes an expiring Device Flow token without a client secret", async () => {
+  let body;
+  const credentials = await refreshGitHubToken("old-refresh", "Iv1.client", {
+    now: 1_000,
+    request: async (_url, options) => {
+      body = new URLSearchParams(options.body);
+      return { ok: true, json: async () => ({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 100, refresh_token_expires_in: 200 }) };
+    }
+  });
+  assert.equal(body.get("client_id"), "Iv1.client");
+  assert.equal(body.get("refresh_token"), "old-refresh");
+  assert.equal(body.get("grant_type"), "refresh_token");
+  assert.equal(body.get("client_secret"), null);
+  assert.deepEqual(credentials, { accessToken: "new-access", refreshToken: "new-refresh", expiresAt: 101_000, refreshTokenExpiresAt: 201_000 });
 });

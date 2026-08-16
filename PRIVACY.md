@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: August 15, 2026. Version 1.1.0.
+Last updated: August 16, 2026. Version 1.1.1.
 
 Playlist & GitHub Bookmarks works inside the user's Chrome profile. It has no backend, analytics, advertising, tracking, or external data store.
 
@@ -12,7 +12,7 @@ Playlist & GitHub Bookmarks works inside the user's Chrome profile. It has no ba
 
 ## Data stored locally
 
-Chrome extension storage holds destination bookmark-folder IDs, YouTube playlist configuration, GitHub OAuth App Client ID, GitHub access token, GitHub account login, IDs of bookmarks created by the extension, and sync summaries.
+Chrome extension storage holds destination bookmark-folder IDs, YouTube playlist configuration, GitHub access and refresh tokens, token expiry times, GitHub account login, IDs of bookmarks created by the extension, and sync summaries.
 
 The GitHub access token stays in the local Chrome profile. It is sent only to GitHub's OAuth and API endpoints. Clicking **Disconnect** deletes it from local extension storage. The extension never asks for or stores a GitHub password, personal access token, or OAuth client secret.
 

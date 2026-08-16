@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Playlist & GitHub Bookmarks",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Mirror YouTube playlists and GitHub Lists as organized Chrome bookmarks.",
   "permissions": ["bookmarks", "storage", "alarms"],
   "host_permissions": ["https://www.youtube.com/*", "https://github.com/*", "https://api.github.com/*"],

@@ -45,13 +45,11 @@ Repository bookmarks retain GitHub's `owner/repository` name and repository URL.
 
 GitHub Lists must be authorized by GitHub. A Google identity alone cannot grant access to GitHub Lists, so the supported connection is **GitHub Device Flow**.
 
-1. Create a GitHub OAuth App in [GitHub Developer Settings](https://github.com/settings/developers). Enable **Device Flow** for the app.
-2. Copy the app's **Client ID**. Do not copy or store its client secret in this extension.
-3. In extension Settings, paste the Client ID under **GitHub Lists**, then click **Connect GitHub**.
-4. A GitHub page opens. Enter the displayed one-time code, authorize the app, then return to Settings.
-5. Choose a separate **GitHub project bookmark folder**, click **Save settings**, and click **Sync GitHub Lists**.
+1. In extension Settings, click **Connect GitHub**.
+2. A GitHub page opens in the already signed-in browser. Enter the displayed one-time code and authorize the extension.
+3. Return to Settings, choose a separate **GitHub project bookmark folder**, click **Save settings**, and click **Sync GitHub Lists**.
 
-The authorization asks GitHub for the `user` scope, which GitHub requires to read Lists. The resulting token remains only in local extension storage. **Disconnect** deletes the local token without removing bookmarks already synchronized.
+The authorization asks GitHub for the read-only `read:user` scope used to identify the account and read its Lists. The public OAuth client ID is built into the extension; no client secret is included. Access and refresh tokens remain only in local extension storage and are renewed automatically. **Disconnect** deletes them without removing bookmarks already synchronized.
 
 ## Configure With An Agent
 
@@ -60,7 +58,7 @@ When a user gives this repository to an agent, the agent should:
 1. Read this README, [PRIVACY.md](PRIVACY.md), and `extension/manifest.json`; explain bookmark, storage, alarm, YouTube, and GitHub permissions before installation.
 2. Ask separately whether the user wants YouTube, GitHub, or both.
 3. For YouTube, ask for the destination folder, playlist names, playlist URLs or IDs, interval, and whether private playlists are expected.
-4. For GitHub, ask for the destination folder and confirm that the user wants to connect their GitHub account. Explain the OAuth App Client ID setup; never request a GitHub password, personal access token, or OAuth client secret.
+4. For GitHub, ask for the destination folder and confirm that the user wants to connect their GitHub account. Never request a GitHub password, personal access token, OAuth client ID, or OAuth client secret.
 5. Guide the user through loading `extension` at `chrome://extensions`. Chrome may restrict agents from operating that internal page, so let the user click there when required.
 6. Save the independent settings, run the first sync for each selected source, and verify the corresponding container and child folders in the bookmark bar.
 
