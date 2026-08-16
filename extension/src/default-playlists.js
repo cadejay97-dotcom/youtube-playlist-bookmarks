@@ -41,6 +41,7 @@ export const DEFAULT_SETTINGS = {
   playlistFolderIds: {},
   lastSync: null,
   lastResult: null,
+  lastAttempt: null,
   githubRootFolderId: null,
   githubContainerName: "项目清单",
   githubContainerId: null,
@@ -52,5 +53,6 @@ export const DEFAULT_SETTINGS = {
   githubListFolderIds: {},
   githubManagedBookmarks: {},
   githubLastSync: null,
-  githubLastResult: null
+  githubLastResult: null,
+  githubLastAttempt: null
 };

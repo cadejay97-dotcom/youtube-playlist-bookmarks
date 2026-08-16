@@ -26,9 +26,10 @@ export async function ensureFolder(parentId, title, knownId) {
   return existing ? existing.id : (await chrome.bookmarks.create({ parentId, title })).id;
 }
 
-export async function mirrorPlaylist({ rootFolderId, playlist, folderId, managed = {} }) {
+export async function mirrorPlaylist({ rootFolderId, playlist, folderId, managed = {}, onProgress }) {
   const resolvedFolderId = await ensureFolder(rootFolderId, playlist.title, folderId);
   const nextManaged = {};
+  const checkpointManaged = { ...managed };
   let created = 0;
   let updated = 0;
   let removed = 0;
@@ -42,10 +43,13 @@ export async function mirrorPlaylist({ rootFolderId, playlist, folderId, managed
         updated += 1;
       }
       nextManaged[video.id] = existing.id;
+      checkpointManaged[video.id] = existing.id;
     } else {
       const createdBookmark = await chrome.bookmarks.create({ parentId: resolvedFolderId, title: video.title, url: video.url });
       nextManaged[video.id] = createdBookmark.id;
+      checkpointManaged[video.id] = createdBookmark.id;
       created += 1;
+      if (onProgress) await onProgress({ folderId: resolvedFolderId, managed: { ...checkpointManaged }, phase: "items" });
     }
   }
 
@@ -60,6 +64,8 @@ export async function mirrorPlaylist({ rootFolderId, playlist, folderId, managed
     if (bookmark?.parentId === resolvedFolderId) {
       await chrome.bookmarks.remove(bookmarkId);
       removed += 1;
+      delete checkpointManaged[videoId];
+      if (onProgress) await onProgress({ folderId: resolvedFolderId, managed: { ...checkpointManaged }, phase: "removals" });
     }
   }
   return { folderId: resolvedFolderId, managed: nextManaged, created, updated, removed };

@@ -44,7 +44,15 @@ export async function syncGitHubLists() {
         rootFolderId: containerFolderId,
         playlist: { id: list.id, title: list.title, videos: list.repositories },
         folderId: nextFolders[list.id],
-        managed: nextManaged[list.id]
+        managed: nextManaged[list.id],
+        onProgress: async (checkpoint) => {
+          nextFolders[list.id] = checkpoint.folderId;
+          nextManaged[list.id] = checkpoint.managed;
+          await chrome.storage.local.set({
+            githubListFolderIds: { ...nextFolders },
+            githubManagedBookmarks: { ...nextManaged }
+          });
+        }
       });
       nextFolders[list.id] = mirrored.folderId;
       nextManaged[list.id] = mirrored.managed;

@@ -132,18 +132,10 @@ $("#github-cancel").addEventListener("click", async () => {
 });
 
 $("#github-disconnect").addEventListener("click", async () => {
-  await chrome.runtime.sendMessage({ type: "github-auth-cancel" });
-  await chrome.storage.local.set({
-    githubToken: null,
-    githubRefreshToken: null,
-    githubTokenExpiresAt: null,
-    githubRefreshTokenExpiresAt: null,
-    githubAccountLogin: null,
-    githubLastResult: null,
-    githubLastSync: null
-  });
+  const response = await chrome.runtime.sendMessage({ type: "github-auth-disconnect" });
+  if (!response.ok) throw new Error(response.error);
   updateGitHubConnection({});
-  renderGitHubAuth({ status: "idle" });
+  renderGitHubAuth(response.auth);
   $("#github-feedback").textContent = "GitHub disconnected. Existing bookmarks were not changed.";
 });
 

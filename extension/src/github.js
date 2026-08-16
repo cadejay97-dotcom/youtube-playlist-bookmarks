@@ -1,4 +1,5 @@
 const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
+const MAX_PAGES = 100;
 
 export const GITHUB_LISTS_QUERY = `
   query ViewerLists($after: String) {
@@ -59,12 +60,7 @@ export function parseGitHubLists(payload) {
     slug: list.slug,
     description: list.description || "",
     isPrivate: Boolean(list.isPrivate),
-    repositories: (list.items?.nodes || []).filter(Boolean).map((repository) => ({
-      id: repository.id,
-      title: repository.nameWithOwner,
-      url: repository.url,
-      description: repository.description || ""
-    }))
+    repositories: repositories(list.items)
   }));
   return { login: viewer.login, lists };
 }
@@ -86,12 +82,33 @@ async function queryGitHub(token, query, variables, request) {
 }
 
 function repositories(items) {
-  return (items?.nodes || []).filter(Boolean).map((repository) => ({
-    id: repository.id,
-    title: repository.nameWithOwner,
-    url: repository.url,
-    description: repository.description || ""
-  }));
+  return (items?.nodes || []).filter(Boolean).map((repository) => {
+    if (typeof repository.id !== "string" || typeof repository.nameWithOwner !== "string") {
+      throw new Error("GitHub returned a repository without a stable ID or name.");
+    }
+    let url;
+    try { url = new URL(repository.url); } catch { throw new Error(`GitHub returned an invalid URL for ${repository.nameWithOwner}.`); }
+    if (url.protocol !== "https:" || url.hostname !== "github.com") {
+      throw new Error(`GitHub returned an untrusted URL for ${repository.nameWithOwner}.`);
+    }
+    return {
+      id: repository.id,
+      title: repository.nameWithOwner,
+      url: url.toString(),
+      description: repository.description || ""
+    };
+  });
+}
+
+function nextCursor(pageInfo, seen, context) {
+  if (!pageInfo?.hasNextPage) return null;
+  const cursor = pageInfo.endCursor;
+  if (typeof cursor !== "string" || !cursor || seen.has(cursor)) {
+    throw new Error(`GitHub pagination stopped making progress for ${context}.`);
+  }
+  seen.add(cursor);
+  if (seen.size >= MAX_PAGES) throw new Error(`GitHub pagination exceeded ${MAX_PAGES} pages for ${context}.`);
+  return cursor;
 }
 
 export async function fetchGitHubLists(token, request = fetch) {
@@ -99,6 +116,7 @@ export async function fetchGitHubLists(token, request = fetch) {
   let after = null;
   let login = "";
   const lists = [];
+  const listCursors = new Set();
   do {
     const payload = await queryGitHub(token, GITHUB_LISTS_QUERY, { after }, request);
     const viewer = payload.data?.viewer;
@@ -108,8 +126,10 @@ export async function fetchGitHubLists(token, request = fetch) {
     for (const list of connection?.nodes || []) {
       const repositoryBookmarks = repositories(list.items);
       let itemPage = list.items?.pageInfo;
+      const itemCursors = new Set();
       while (itemPage?.hasNextPage) {
-        const itemPayload = await queryGitHub(token, GITHUB_LIST_ITEMS_QUERY, { id: list.id, after: itemPage.endCursor }, request);
+        const itemAfter = nextCursor(itemPage, itemCursors, `List ${list.name || list.id}`);
+        const itemPayload = await queryGitHub(token, GITHUB_LIST_ITEMS_QUERY, { id: list.id, after: itemAfter }, request);
         const items = itemPayload.data?.node?.items;
         repositoryBookmarks.push(...repositories(items));
         itemPage = items?.pageInfo;
@@ -123,7 +143,7 @@ export async function fetchGitHubLists(token, request = fetch) {
         repositories: repositoryBookmarks
       });
     }
-    after = connection?.pageInfo?.hasNextPage ? connection.pageInfo.endCursor : null;
+    after = nextCursor(connection?.pageInfo, listCursors, "GitHub Lists");
   } while (after);
   return { login, lists };
 }

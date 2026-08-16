@@ -74,16 +74,13 @@ export function parsePlaylistHtml(html, playlistId) {
 }
 
 export async function fetchPlaylist(playlist) {
-  let url;
-  try {
-    url = new URL(playlist.url);
-  } catch {
-    url = new URL("https://www.youtube.com/playlist");
-  }
-  url.searchParams.set("list", playlist.id);
+  const playlistId = String(playlist.id || "").trim();
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(playlistId)) throw new Error(`Invalid YouTube playlist ID for ${playlist.title}.`);
+  const url = new URL("https://www.youtube.com/playlist");
+  url.searchParams.set("list", playlistId);
   url.searchParams.set("hl", "en");
   const response = await fetch(url, { credentials: "include" });
   if (!response.ok) throw new Error(`YouTube returned ${response.status} for ${playlist.title}.`);
-  const result = parsePlaylistHtml(await response.text(), playlist.id);
+  const result = parsePlaylistHtml(await response.text(), playlistId);
   return { ...playlist, title: result.title || playlist.title, videos: result.videos };
 }

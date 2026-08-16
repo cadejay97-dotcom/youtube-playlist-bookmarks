@@ -58,3 +58,35 @@ test("updates and removes only managed bookmarks while preserving manual bookmar
   assert.ok(mock.nodes.has(manual.id));
   assert.deepEqual(mock.children.get(initial.folderId).slice(0, 2).map((id) => mock.nodes.get(id).title), ["B revised", "C"]);
 });
+
+test("checkpoints created bookmarks so retry converges after a partial failure", async () => {
+  const mock = createBookmarksMock();
+  globalThis.chrome = { bookmarks: mock.bookmarkApi };
+  const containerId = await ensureFolder("1", "播放清单");
+  const originalCreate = mock.bookmarkApi.create;
+  let failSecondVideo = true;
+  mock.bookmarkApi.create = async (details) => {
+    if (failSecondVideo && details.url?.includes("watch?v=b")) throw new Error("injected create failure");
+    return originalCreate(details);
+  };
+  let checkpoint;
+  await assert.rejects(
+    mirrorPlaylist({
+      rootFolderId: containerId,
+      playlist: playlist([video("a", "A"), video("b", "B")]),
+      onProgress: async (value) => { checkpoint = value; }
+    }),
+    /injected create failure/
+  );
+  assert.deepEqual(Object.keys(checkpoint.managed), ["a"]);
+
+  failSecondVideo = false;
+  const retried = await mirrorPlaylist({
+    rootFolderId: containerId,
+    folderId: checkpoint.folderId,
+    managed: checkpoint.managed,
+    playlist: playlist([video("a", "A"), video("b", "B")])
+  });
+  assert.equal(retried.created, 1);
+  assert.deepEqual(mock.children.get(checkpoint.folderId).map((id) => mock.nodes.get(id).title), ["A", "B"]);
+});

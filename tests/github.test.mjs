@@ -71,6 +71,22 @@ test("paginates through GitHub Lists as well as their repository bookmarks", asy
   assert.deepEqual(requestedVariables, [{ after: null }, { after: "lists-page-2" }]);
 });
 
+test("rejects pagination that stops making cursor progress", async () => {
+  const repeatedPage = {
+    data: { viewer: { login: "octocat", lists: { pageInfo: { hasNextPage: true, endCursor: "same" }, nodes: [] } } }
+  };
+  await assert.rejects(
+    fetchGitHubLists("token", async () => ({ ok: true, json: async () => repeatedPage })),
+    /stopped making progress for GitHub Lists/
+  );
+});
+
+test("rejects repository URLs outside canonical GitHub HTTPS", () => {
+  const payload = structuredClone(graphQlPayload);
+  payload.data.viewer.lists.nodes[0].items.nodes[0].url = "javascript:alert(1)";
+  assert.throws(() => parseGitHubLists(payload), /untrusted URL/);
+});
+
 test("requests GitHub Device Flow with read-only user access", async () => {
   let body;
   const device = await requestDeviceCode("Iv1.client", async (_url, options) => {
@@ -157,6 +173,7 @@ test("keeps GitHub authorization in the background until the account is connecte
     alarms: {
       clear: async (name) => alarms.delete(name),
       create: (name, value) => { alarmCreates += 1; alarms.set(name, value); },
+      get: async (name) => alarms.has(name) ? { name, scheduledTime: alarms.get(name).when } : undefined,
       onAlarm: { addListener: (listener) => { onAlarm = listener; } }
     },
     bookmarks: {},
@@ -164,6 +181,7 @@ test("keeps GitHub authorization in the background until the account is connecte
       onInstalled: { addListener: () => undefined },
       onMessage: { addListener: (listener) => { onMessage = listener; } }
     },
+    crypto: globalThis.crypto,
     storage: {
       local: {
         get: async (query) => read(local, query),
@@ -195,8 +213,29 @@ test("keeps GitHub authorization in the background until the account is connecte
   };
 
   try {
-    await import(`../extension/src/background.js?auth-test=${Date.now()}`);
+    const background = await import(`../extension/src/background.js?auth-test=${Date.now()}`);
     const send = (message) => new Promise((resolve) => onMessage(message, {}, resolve));
+
+    let finishSync;
+    let syncCalls = 0;
+    const firstSync = background.runProviderSync("youtube", "manual", () => {
+      syncCalls += 1;
+      return new Promise((resolve) => { finishSync = resolve; });
+    });
+    const joinedSync = background.runProviderSync("youtube", "alarm", () => {
+      syncCalls += 1;
+      return Promise.resolve({ success: true });
+    });
+    for (let attempt = 0; attempt < 20 && !finishSync; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(syncCalls, 1);
+    finishSync({ success: true, marker: "shared" });
+    assert.deepEqual(await Promise.all([firstSync, joinedSync]), [
+      { success: true, marker: "shared" },
+      { success: true, marker: "shared" }
+    ]);
+    assert.equal(local.lastAttempt.status, "success");
+    assert.equal(local.lastAttempt.trigger, "manual");
+
     const started = await send({ type: "github-auth-start" });
     assert.equal(started.auth.status, "code");
     assert.equal(started.auth.userCode, "ABCD-EFGH");
@@ -204,16 +243,24 @@ test("keeps GitHub authorization in the background until the account is connecte
 
     const continued = await send({ type: "github-auth-continue" });
     assert.equal(continued.auth.status, "pending");
+    const duplicateContinue = await send({ type: "github-auth-continue" });
+    assert.equal(duplicateContinue.auth.status, "pending");
     assert.deepEqual(openedTabs, ["https://github.com/login/device"]);
     assert.ok(alarms.has("github-auth-poll"));
 
+    alarms.delete("github-auth-poll");
+    const recovered = await send({ type: "github-auth-status" });
+    assert.equal(recovered.auth.status, "pending");
+    assert.ok(alarms.has("github-auth-poll"));
+
+    const alarmCreatesBeforePoll = alarmCreates;
     onAlarm({ name: "github-auth-poll" });
-    for (let attempt = 0; attempt < 20 && alarmCreates < 2; attempt += 1) {
+    for (let attempt = 0; attempt < 20 && (tokenPolls < 1 || alarmCreates < alarmCreatesBeforePoll + 2); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     assert.equal(session.githubAuthSession.status, "pending");
     assert.equal(tokenPolls, 1);
-    assert.equal(alarmCreates, 2);
+    assert.equal(alarmCreates, alarmCreatesBeforePoll + 2);
     assert.ok(alarms.has("github-auth-poll"));
 
     onAlarm({ name: "github-auth-poll" });
@@ -221,6 +268,34 @@ test("keeps GitHub authorization in the background until the account is connecte
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     assert.equal(session.githubAuthSession.status, "connected");
+    assert.equal(local.githubToken, "approved-token");
+    assert.equal(local.githubAccountLogin, "octocat");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    let finishStalePoll;
+    globalThis.fetch = async (url) => {
+      if (url === "https://github.com/login/device/code") {
+        return { ok: true, json: async () => ({ device_code: "replacement-device", user_code: "IJKL-MNOP", verification_uri: "https://github.com/login/device", expires_in: 900, interval: 5 }) };
+      }
+      if (url === "https://github.com/login/oauth/access_token") {
+        tokenPolls += 1;
+        return new Promise((resolve) => { finishStalePoll = () => resolve({ ok: true, json: async () => ({ access_token: "stale-token", expires_in: 28800 }) }); });
+      }
+      if (url === "https://api.github.com/user") return { ok: true, json: async () => ({ login: "wrong-account" }) };
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    await send({ type: "github-auth-start" });
+    await send({ type: "github-auth-continue" });
+    const pollsBeforeRace = tokenPolls;
+    onAlarm({ name: "github-auth-poll" });
+    onAlarm({ name: "github-auth-poll" });
+    for (let attempt = 0; attempt < 20 && !finishStalePoll; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(tokenPolls, pollsBeforeRace + 1);
+    const canceled = await send({ type: "github-auth-cancel" });
+    assert.equal(canceled.auth.status, "connected");
+    finishStalePoll();
+    for (let attempt = 0; attempt < 20; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(local.githubToken, "approved-token");
     assert.equal(local.githubAccountLogin, "octocat");
   } finally {

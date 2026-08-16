@@ -12,7 +12,9 @@ async function folderTitle(id) {
   return folder ? `Destination: ${folder.title}` : "Destination folder is unavailable";
 }
 
-function resultText(result, timestamp, itemName) {
+function resultText(result, timestamp, itemName, attempt) {
+  if (attempt?.status === "running") return `${attempt.trigger === "manual" ? "Manual" : "Automatic"} sync is running...`;
+  if (attempt?.status === "failed") return `Last ${attempt.trigger === "manual" ? "manual" : "automatic"} attempt failed: ${attempt.error || "Unknown error"}`;
   if (!result) return "Not synced yet.";
   if (!result.success) return result.failed?.map((item) => `${item.title}: ${item.error}`).join(" ") || "The last sync did not finish.";
   return `${dateText(timestamp)} - ${result.ok.length} ${itemName}, ${result.created} added, ${result.updated} updated, ${result.removed} removed`;
@@ -23,13 +25,13 @@ async function render() {
   $("#youtube-destination").textContent = await folderTitle(settings.rootFolderId);
   $("#youtube-count").textContent = `${settings.playlists.length} selected`;
   $("#youtube-status").textContent = settings.rootFolderId
-    ? resultText(settings.lastResult, settings.lastSync, "playlists")
+    ? resultText(settings.lastResult, settings.lastSync, "playlists", settings.lastAttempt)
     : "Choose a bookmark folder in Settings to begin.";
 
   $("#github-destination").textContent = await folderTitle(settings.githubRootFolderId);
   $("#github-account").textContent = settings.githubAccountLogin ? `@${settings.githubAccountLogin}` : "Not connected";
   $("#github-status").textContent = settings.githubToken
-    ? resultText(settings.githubLastResult, settings.githubLastSync, "Lists")
+    ? resultText(settings.githubLastResult, settings.githubLastSync, "Lists", settings.githubLastAttempt)
     : "Connect GitHub in Settings to begin.";
   const githubButton = $("#github-sync");
   githubButton.textContent = settings.githubToken && settings.githubRootFolderId ? "Sync GitHub Lists" : "Connect GitHub";

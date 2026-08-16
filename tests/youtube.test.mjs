@@ -37,3 +37,21 @@ test("fetches a playlist by ID when no full YouTube URL is supplied", async () =
     globalThis.fetch = originalFetch;
   }
 });
+
+test("always fetches the canonical YouTube origin", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl;
+  globalThis.fetch = async (url) => {
+    requestedUrl = String(url);
+    return { ok: true, text: async () => html };
+  };
+  try {
+    await fetchPlaylist({ id: "PLsafe123456", title: "Safe", url: "https://github.com/settings/profile" });
+    const url = new URL(requestedUrl);
+    assert.equal(url.origin, "https://www.youtube.com");
+    assert.equal(url.pathname, "/playlist");
+    assert.equal(url.searchParams.get("list"), "PLsafe123456");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
