@@ -124,7 +124,7 @@ export async function reconcileTabGroup(selection, api) {
   }
 
   const allManagedTabIds = Object.values(managedTabs).map((tab) => tab.tabId);
-  const groupId = await ensureGroup(tabApi, previous?.groupId, newTabIds.length ? newTabIds : allManagedTabIds, selection.title.trim());
+  const groupId = await ensureGroup(tabApi, previous?.groupId, allManagedTabIds, selection.title.trim());
   groups[selection.provider][selection.sourceId] = {
     groupId,
     title: selection.title.trim(),

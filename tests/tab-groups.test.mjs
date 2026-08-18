@@ -77,6 +77,16 @@ test("opens a list in a named group and converges updates without duplicates", a
   assert.deepEqual({ created: second.created, updated: second.updated, removed: second.removed }, { created: 1, updated: 1, removed: 1 });
   assert.equal(mock.tabs.size, 2);
   assert.equal((await openTabGroupSummaries(mock.api)).youtube[0].title, "Living in the vibe.");
+
+  const managedTab = [...mock.tabs.values()][0];
+  managedTab.groupId = -1;
+  await reconcileTabGroup({
+    provider: "youtube",
+    sourceId: "PL_ONE",
+    title: "Living in the vibe.",
+    items: [{ id: "video-1", url: "https://www.youtube.com/watch?v=updated" }, { id: "video-3", url: "https://www.youtube.com/watch?v=three" }]
+  }, mock.api);
+  assert.equal(managedTab.groupId, first.groupId);
 });
 
 test("closing a selected group removes its tabs and persisted selection", async () => {
