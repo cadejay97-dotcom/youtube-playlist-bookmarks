@@ -52,6 +52,9 @@ function validateSelection({ provider, sourceId, title, items }) {
     let url;
     try { url = new URL(item.url); } catch { throw new Error(`${title} contains an invalid URL.`); }
     if (url.protocol !== "https:") throw new Error(`${title} contains an untrusted URL.`);
+    if (provider === "youtube" && !["youtube.com", "www.youtube.com"].includes(url.hostname)) throw new Error(`${title} contains a non-YouTube URL.`);
+    if (provider === "github" && url.hostname !== "github.com") throw new Error(`${title} contains a non-GitHub URL.`);
+    if (provider === "youtube") url.searchParams.set("autoplay", "0");
     return { id: item.id, url: url.toString() };
   });
 }
@@ -89,7 +92,6 @@ export async function reconcileTabGroup(selection, api) {
   const groups = await readGroups(tabApi.storage);
   const previous = groups[selection.provider][selection.sourceId] || null;
   const managedTabs = {};
-  const newTabIds = [];
   let created = 0;
   let updated = 0;
   let removed = 0;
@@ -109,7 +111,6 @@ export async function reconcileTabGroup(selection, api) {
     }
     const createdTab = await createTab(tabApi.tabs, item.url, windowId);
     managedTabs[item.id] = { tabId: createdTab.id, url: item.url };
-    newTabIds.push(createdTab.id);
     windowId = windowId ?? createdTab.windowId;
     created += 1;
   }
@@ -160,9 +161,4 @@ export async function openTabGroupSummaries(api) {
     provider,
     Object.entries(entries).map(([sourceId, group]) => ({ sourceId, groupId: group.groupId, title: group.title }))
   ]));
-}
-
-export async function selectedTabGroupIds(provider, api) {
-  const groups = await openTabGroupSummaries(api);
-  return new Set((groups[provider] || []).map((group) => group.sourceId));
 }

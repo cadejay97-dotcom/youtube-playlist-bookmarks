@@ -67,6 +67,8 @@ test("opens a list in a named group and converges updates without duplicates", a
   assert.equal(first.created, 2);
   assert.equal(mock.groups.get(first.groupId).title, "Living in the vibe.");
   assert.equal(mock.tabs.size, 2);
+  assert.equal([...mock.tabs.values()][0].active, false);
+  assert.match([...mock.tabs.values()][0].url, /(?:\?|&)autoplay=0(?:&|$)/);
 
   const second = await reconcileTabGroup({
     provider: "youtube",
@@ -106,5 +108,13 @@ test("rejects non-HTTPS tab group content", async () => {
   await assert.rejects(
     reconcileTabGroup({ provider: "github", sourceId: "UL_ONE", title: "Unsafe", items: [{ id: "repo-1", url: "javascript:alert(1)" }] }, mock.api),
     /untrusted URL/
+  );
+});
+
+test("rejects cross-provider URLs", async () => {
+  const mock = createChromeMock();
+  await assert.rejects(
+    reconcileTabGroup({ provider: "youtube", sourceId: "PL_ONE", title: "Unsafe", items: [{ id: "video-1", url: "https://example.com/video" }] }, mock.api),
+    /non-YouTube URL/
   );
 });

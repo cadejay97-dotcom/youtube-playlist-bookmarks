@@ -61,6 +61,8 @@ The popup also exposes the currently readable YouTube playlists and GitHub Lists
 2. The extension opens each video or repository URL in a new Chrome tab group named after that list.
 3. Click **Close group** on the same row to close that group's tabs and clear its saved selection.
 
+YouTube tabs are created in the background with `autoplay=0`; opening a playlist does not start every video. Select an individual YouTube tab and press play when you want to watch it.
+
 Open groups are stored separately from bookmark state. During the existing automatic sync interval, the extension rereads every open playlist/List and converges only the tabs it created: new items are opened, changed URLs are updated, and removed items are closed. Manually opened tabs are not removed during refresh, but closing a selected group closes all tabs currently inside that Chrome group. If a source cannot be read temporarily, the current tabs remain open and the next scheduled check retries.
 
 Opening a large playlist or List can create many tabs. Chrome may ask you to allow the extension's `tabGroups` permission when the updated unpacked extension is reloaded.

@@ -12,6 +12,7 @@
 - Add YouTube playlist and GitHub List tab groups from the extension popup.
 - Open each selected list in a named Chrome tab group, close it from the same control, and persist the open selection across service-worker restarts.
 - Refresh open groups during the existing automatic sync interval: add new items, update changed URLs, and remove only extension-managed tabs for items that disappeared.
+- Keep YouTube group tabs inactive with `autoplay=0` so opening a playlist does not start every video.
 - Add `tabGroups` permission and tests for group creation, convergence, closure, and URL validation.
 
 ## 1.1.1 - 2026-08-16
