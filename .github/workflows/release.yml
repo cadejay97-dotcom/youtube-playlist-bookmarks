@@ -1,0 +1,124 @@
+name: Release extension
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Validate source
+        run: npm run validate
+
+      - name: Build release package
+        run: |
+          npm run package
+          npm run verify:package
+
+      - name: Check tag version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+
+          const tag = process.env.RELEASE_TAG;
+          const packageVersion = JSON.parse(readFileSync('package.json', 'utf8')).version;
+          const manifestVersion = JSON.parse(readFileSync('extension/manifest.json', 'utf8')).version;
+          const expectedTag = `v${packageVersion}`;
+          if (tag !== expectedTag || manifestVersion !== packageVersion) {
+            throw new Error(`Release tag ${tag} must match package and manifest version ${packageVersion}`);
+          }
+          console.log(`Releasing ${tag}`);
+          NODE
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            outputs/youtube-playlist-bookmarks.zip \
+            --verify-tag \
+            --title "Playlist & GitHub Bookmarks $RELEASE_TAG" \
+            --generate-notes
+
+  publish-chrome-web-store:
+    name: Publish to Chrome Web Store (opt-in)
+    needs: release
+    if: ${{ vars.ENABLE_CWS_PUBLISH == 'true' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: chrome-web-store
+      url: https://chromewebstore.google.com/
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Build release package
+        run: |
+          npm run package
+          npm run verify:package
+
+      - name: Get Chrome Web Store access token
+        id: token
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        run: |
+          test -n "$CWS_CLIENT_ID" -a -n "$CWS_CLIENT_SECRET" -a -n "$CWS_REFRESH_TOKEN" \
+            || { echo "Chrome Web Store OAuth secrets are not configured" >&2; exit 1; }
+          token_response=$(curl --fail-with-body --silent --show-error \
+            --request POST https://oauth2.googleapis.com/token \
+            --data-urlencode "client_id=$CWS_CLIENT_ID" \
+            --data-urlencode "client_secret=$CWS_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$CWS_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token')
+          access_token=$(jq --exit-status --raw-output '.access_token' <<<"$token_response")
+          echo "::add-mask::$access_token"
+          echo "access_token=$access_token" >> "$GITHUB_OUTPUT"
+
+      - name: Upload package
+        env:
+          ACCESS_TOKEN: ${{ steps.token.outputs.access_token }}
+          CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+        run: |
+          test -n "$CWS_EXTENSION_ID" || { echo "CWS_EXTENSION_ID is not configured" >&2; exit 1; }
+          upload_response=$(curl --fail-with-body --silent --show-error \
+            --request PUT "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$CWS_EXTENSION_ID" \
+            --header "Authorization: Bearer $ACCESS_TOKEN" \
+            --header 'x-goog-api-version: 2' \
+            --header 'Content-Type: application/zip' \
+            --data-binary @outputs/youtube-playlist-bookmarks.zip)
+          jq --exit-status '(.uploadState // "") == "SUCCESS"' <<<"$upload_response"
+
+      - name: Publish package
+        env:
+          ACCESS_TOKEN: ${{ steps.token.outputs.access_token }}
+          CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+        run: |
+          publish_response=$(curl --fail-with-body --silent --show-error \
+            --request POST "https://www.googleapis.com/chromewebstore/v1.1/items/$CWS_EXTENSION_ID/publish" \
+            --header "Authorization: Bearer $ACCESS_TOKEN" \
+            --header 'x-goog-api-version: 2')
+          jq --exit-status '(.status // []) | any(. == "OK")' <<<"$publish_response"

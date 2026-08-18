@@ -90,6 +90,26 @@ npm run package
 
 `npm run package` writes `outputs/youtube-playlist-bookmarks.zip`, ready for a Chrome Web Store upload.
 
+## Continuous Delivery
+
+Every pushed version tag in the form `vX.Y.Z` runs the same validation and packaging checks as CI. The tag must equal the versions in `package.json` and `extension/manifest.json`; a mismatch fails before publication. A successful run creates a [GitHub Release](https://github.com/cadejay97-dotcom/youtube-playlist-bookmarks/releases) and attaches `youtube-playlist-bookmarks.zip`.
+
+To publish a version:
+
+```bash
+git switch main
+git pull --ff-only
+# Update package.json and extension/manifest.json to the same version.
+git add package.json extension/manifest.json CHANGELOG.md
+git commit -m "Release vX.Y.Z"
+git tag vX.Y.Z
+git push origin main vX.Y.Z
+```
+
+By default, Chrome Web Store publication is not automatic. Store uploads require a verified developer account, an extension listing, and protected Web Store credentials; upload the ZIP from the GitHub Release through the [Developer Dashboard](https://chrome.google.com/webstore/devconsole/) after reviewing the generated release notes. No store credentials are stored in this repository.
+
+For an explicitly approved store CD, configure a protected GitHub environment named `chrome-web-store`, add the repository variable `ENABLE_CWS_PUBLISH=true`, and add these Actions secrets: `CWS_EXTENSION_ID`, `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, and `CWS_REFRESH_TOKEN`. The release workflow then uploads and publishes the tagged ZIP after the environment's required approval. Leave the variable unset to keep store publication manual.
+
 ## Chrome Web Store Release
 
 1. Create a developer account in the [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole/).

@@ -6,6 +6,7 @@
 - Add authorization cancellation/race guards, alarm recovery, transient retry handling, and provider sync single-flight behavior.
 - Request GitHub host access only when connecting and exclude private GitHub Lists unless explicitly enabled.
 - Preserve manual bookmarks when configured sources disappear and verify packaged release contents in CI.
+- Add tag-based GitHub Release CD with version checks and an attached extension package.
 
 ## 1.2.0 - 2026-08-18
 
