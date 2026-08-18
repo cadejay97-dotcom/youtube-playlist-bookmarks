@@ -37,7 +37,8 @@ test("creates project list, GitHub List, and repository bookmark hierarchy", asy
     ] } } } })
   });
   try {
-    const result = await syncGitHubLists();
+    let fetchedSource;
+    const result = await syncGitHubLists({ onSource: (source) => { fetchedSource = source; } });
     const rootChildren = bookmarks.children.get("1").map((id) => bookmarks.nodes.get(id));
     const container = rootChildren.find((node) => node.title === "项目清单");
     const list = bookmarks.children.get(container.id).map((id) => bookmarks.nodes.get(id)).find((node) => node.title === "Lark AI Native");
@@ -46,6 +47,8 @@ test("creates project list, GitHub List, and repository bookmark hierarchy", asy
     assert.equal(repository.url, "https://github.com/acme/project");
     assert.equal(result.created, 1);
     assert.equal(result.skippedPrivate, 1);
+    assert.equal(fetchedSource.login, "octocat");
+    assert.equal(fetchedSource.lists.length, 1);
     assert.equal(bookmarks.children.get(container.id).some((id) => bookmarks.nodes.get(id).title === "Private research"), false);
     assert.equal(storage.githubAccountLogin, "octocat");
   } finally {

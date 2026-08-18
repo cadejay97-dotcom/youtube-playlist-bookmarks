@@ -46,10 +46,11 @@ export async function fetchConfiguredGitHubLists(settings = null) {
   };
 }
 
-export async function syncGitHubLists() {
+export async function syncGitHubLists({ onSource } = {}) {
   const settings = await getSettings();
   if (!settings.githubRootFolderId) throw new Error("Choose a GitHub project destination folder in Settings before syncing.");
   const source = await fetchConfiguredGitHubLists(settings);
+  await onSource?.(source);
   const lists = source.lists;
   const result = { ok: [], failed: [], created: 0, updated: 0, removed: 0, skippedPrivate: source.allLists.length - lists.length, at: new Date().toISOString() };
   const nextFolders = { ...settings.githubListFolderIds };

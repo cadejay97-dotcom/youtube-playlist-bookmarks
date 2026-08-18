@@ -481,6 +481,7 @@ export async function syncAll() {
   const settings = await getSettings();
   if (!settings.rootFolderId) throw new Error("Choose a destination bookmark folder in Settings before syncing.");
   const result = { ok: [], failed: [], created: 0, updated: 0, removed: 0, at: new Date().toISOString() };
+  const fetchedPlaylists = new Map();
   const nextFolders = { ...settings.playlistFolderIds };
   const nextManaged = { ...settings.managedBookmarks };
   const containerFolderId = await ensureFolder(
@@ -492,6 +493,7 @@ export async function syncAll() {
   for (const playlist of settings.playlists) {
     try {
       const fetched = await fetchPlaylist(playlist);
+      fetchedPlaylists.set(playlist.id, fetched);
       const mirrored = await mirrorPlaylist({
         rootFolderId: containerFolderId,
         playlist: fetched,
@@ -529,6 +531,7 @@ export async function syncAll() {
     });
   }
   result.success = result.failed.length === 0;
+  await refreshOpenTabGroups("youtube", fetchedPlaylists);
   await chrome.storage.local.set({
     playlistFolderIds: nextFolders,
     playlistContainerId: containerFolderId,
@@ -580,7 +583,7 @@ async function openConfiguredTabGroup(provider, sourceId) {
   throw new Error("Unsupported tab group source.");
 }
 
-async function refreshOpenTabGroups(provider) {
+async function refreshOpenTabGroups(provider, fetchedSources = null) {
   const summaries = await openTabGroupSummaries();
   const open = summaries[provider] || [];
   if (!open.length) return { provider, updated: 0, closed: 0, failed: [] };
@@ -589,7 +592,9 @@ async function refreshOpenTabGroups(provider) {
   let updated = 0;
   let closed = 0;
   let githubLists = null;
-  if (provider === "github") {
+  if (provider === "github" && fetchedSources) {
+    githubLists = fetchedSources.lists || [];
+  } else if (provider === "github") {
     try {
       githubLists = (await fetchConfiguredGitHubLists(settings)).lists;
     } catch (error) {
@@ -601,7 +606,8 @@ async function refreshOpenTabGroups(provider) {
       if (provider === "youtube") {
         const playlist = settings.playlists.find((item) => item.id === group.sourceId);
         if (!playlist) { await closeTabGroup({ provider, sourceId: group.sourceId }); closed += 1; continue; }
-        const fetched = await fetchPlaylist(playlist);
+        const fetched = fetchedSources instanceof Map ? fetchedSources.get(group.sourceId) : await fetchPlaylist(playlist);
+        if (!fetched) { failures.push({ sourceId: group.sourceId, error: "The source did not refresh; keeping current tabs." }); continue; }
         await reconcileTabGroup({ provider, sourceId: group.sourceId, title: fetched.title || playlist.title, items: fetched.videos });
       } else {
         const list = githubLists?.find((item) => item.id === group.sourceId);
@@ -619,14 +625,13 @@ async function refreshOpenTabGroups(provider) {
 }
 
 async function syncYouTubeAndGroups() {
-  const result = await syncAll();
-  await refreshOpenTabGroups("youtube");
-  return result;
+  return syncAll();
 }
 
 async function syncGitHubAndGroups() {
-  const result = await syncGitHubLists();
-  await refreshOpenTabGroups("github");
+  let fetchedSource = null;
+  const result = await syncGitHubLists({ onSource: (source) => { fetchedSource = source; } });
+  await refreshOpenTabGroups("github", fetchedSource);
   return result;
 }
 
