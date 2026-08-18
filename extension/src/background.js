@@ -1,10 +1,11 @@
 import { DEFAULT_SETTINGS } from "./default-playlists.js";
 import { archiveManagedFolder, ensureFolder, mirrorPlaylist } from "./bookmarks.js";
 import { fetchPlaylist } from "./youtube.js";
-import { syncGitHubLists } from "./github-sync.js";
+import { fetchConfiguredGitHubLists, syncGitHubLists } from "./github-sync.js";
 import { pollGitHubTokenOnce, requestDeviceCode } from "./github-auth.js";
 import { fetchGitHubViewer } from "./github.js";
 import { GITHUB_OAUTH_CLIENT_ID } from "./github-config.js";
+import { closeTabGroup, openTabGroupSummaries, reconcileTabGroup } from "./tab-groups.js";
 
 const ALARM_NAME = "playlist-bookmark-sync";
 const GITHUB_AUTH_ALARM_NAME = "github-auth-poll";
@@ -25,7 +26,7 @@ async function initializeStorage() {
   const updates = {};
   if (stored.schemaVersion !== DEFAULT_SETTINGS.schemaVersion) updates.schemaVersion = DEFAULT_SETTINGS.schemaVersion;
   if (!Array.isArray(stored.playlists)) updates.playlists = DEFAULT_SETTINGS.playlists;
-  for (const key of ["managedBookmarks", "playlistFolderIds", "githubListFolderIds", "githubManagedBookmarks"]) {
+  for (const key of ["managedBookmarks", "playlistFolderIds", "githubListFolderIds", "githubManagedBookmarks", "openTabGroups"]) {
     if (!stored[key] || typeof stored[key] !== "object" || Array.isArray(stored[key])) updates[key] = {};
   }
   if (typeof stored.githubIncludePrivateLists !== "boolean") updates.githubIncludePrivateLists = false;
@@ -539,6 +540,96 @@ export async function syncAll() {
   return result;
 }
 
+async function getTabGroupCatalog() {
+  const settings = await getSettings();
+  const youtube = await Promise.all(settings.playlists.map(async (playlist) => {
+    try {
+      const fetched = await fetchPlaylist(playlist);
+      return { id: playlist.id, title: fetched.title || playlist.title, count: fetched.videos.length };
+    } catch (error) {
+      return { id: playlist.id, title: playlist.title, count: 0, error: error.message };
+    }
+  }));
+  let github = [];
+  let githubError = null;
+  if (settings.githubToken) {
+    try {
+      const source = await fetchConfiguredGitHubLists(settings);
+      github = source.lists.map((list) => ({ id: list.id, title: list.title, count: list.repositories.length, isPrivate: list.isPrivate }));
+    } catch (error) {
+      githubError = error.message;
+    }
+  }
+  return { youtube, github, githubError, openGroups: await openTabGroupSummaries() };
+}
+
+async function openConfiguredTabGroup(provider, sourceId) {
+  const settings = await getSettings();
+  if (provider === "youtube") {
+    const playlist = settings.playlists.find((item) => item.id === sourceId);
+    if (!playlist) throw new Error("The selected YouTube playlist is no longer configured.");
+    const fetched = await fetchPlaylist(playlist);
+    return reconcileTabGroup({ provider, sourceId, title: fetched.title || playlist.title, items: fetched.videos });
+  }
+  if (provider === "github") {
+    const source = await fetchConfiguredGitHubLists(settings);
+    const list = source.lists.find((item) => item.id === sourceId);
+    if (!list) throw new Error("The selected GitHub List is unavailable or private.");
+    return reconcileTabGroup({ provider, sourceId, title: list.title, items: list.repositories });
+  }
+  throw new Error("Unsupported tab group source.");
+}
+
+async function refreshOpenTabGroups(provider) {
+  const summaries = await openTabGroupSummaries();
+  const open = summaries[provider] || [];
+  if (!open.length) return { provider, updated: 0, closed: 0, failed: [] };
+  const settings = await getSettings();
+  const failures = [];
+  let updated = 0;
+  let closed = 0;
+  let githubLists = null;
+  if (provider === "github") {
+    try {
+      githubLists = (await fetchConfiguredGitHubLists(settings)).lists;
+    } catch (error) {
+      failures.push({ sourceId: "github", error: error.message });
+    }
+  }
+  for (const group of open) {
+    try {
+      if (provider === "youtube") {
+        const playlist = settings.playlists.find((item) => item.id === group.sourceId);
+        if (!playlist) { await closeTabGroup({ provider, sourceId: group.sourceId }); closed += 1; continue; }
+        const fetched = await fetchPlaylist(playlist);
+        await reconcileTabGroup({ provider, sourceId: group.sourceId, title: fetched.title || playlist.title, items: fetched.videos });
+      } else {
+        const list = githubLists?.find((item) => item.id === group.sourceId);
+        if (!list) { if (githubLists) { await closeTabGroup({ provider, sourceId: group.sourceId }); closed += 1; } continue; }
+        await reconcileTabGroup({ provider, sourceId: group.sourceId, title: list.title, items: list.repositories });
+      }
+      updated += 1;
+    } catch (error) {
+      failures.push({ sourceId: group.sourceId, error: error.message });
+    }
+  }
+  const result = { provider, updated, closed, failed: failures, checkedAt: new Date().toISOString() };
+  await chrome.storage.local.set({ tabGroupLastUpdate: result });
+  return result;
+}
+
+async function syncYouTubeAndGroups() {
+  const result = await syncAll();
+  await refreshOpenTabGroups("youtube");
+  return result;
+}
+
+async function syncGitHubAndGroups() {
+  const result = await syncGitHubLists();
+  await refreshOpenTabGroups("github");
+  return result;
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
   try {
     await initializeStorage();
@@ -572,8 +663,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name !== ALARM_NAME) return;
   getSettings().then((settings) => {
-    if (settings.rootFolderId) runProviderSync("youtube", "alarm", syncAll).catch((error) => console.error("YouTube sync failed", error));
-    if (settings.githubRootFolderId && settings.githubToken) runProviderSync("github", "alarm", syncGitHubLists).catch((error) => console.error("GitHub sync failed", error));
+    if (settings.rootFolderId) runProviderSync("youtube", "alarm", syncYouTubeAndGroups).catch((error) => console.error("YouTube sync failed", error));
+    else refreshOpenTabGroups("youtube").catch((error) => console.error("YouTube tab group refresh failed", error));
+    if (settings.githubRootFolderId && settings.githubToken) runProviderSync("github", "alarm", syncGitHubAndGroups).catch((error) => console.error("GitHub sync failed", error));
+    else if (settings.githubToken) refreshOpenTabGroups("github").catch((error) => console.error("GitHub tab group refresh failed", error));
   }).catch((error) => console.error("Scheduled sync setup failed", error));
 });
 
@@ -599,11 +692,23 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     return true;
   }
   if (message.type === "sync-now" || message.type === "youtube-sync-now") {
-    runProviderSync("youtube", "manual", syncAll).then((result) => respond({ ok: true, result })).catch((error) => respond({ ok: false, error: error.message }));
+    runProviderSync("youtube", "manual", syncYouTubeAndGroups).then((result) => respond({ ok: true, result })).catch((error) => respond({ ok: false, error: error.message }));
     return true;
   }
   if (message.type === "github-sync-now") {
-    runProviderSync("github", "manual", syncGitHubLists).then((result) => respond({ ok: true, result })).catch((error) => respond({ ok: false, error: error.message }));
+    runProviderSync("github", "manual", syncGitHubAndGroups).then((result) => respond({ ok: true, result })).catch((error) => respond({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message.type === "tab-groups-catalog") {
+    getTabGroupCatalog().then((catalog) => respond({ ok: true, catalog })).catch((error) => respond({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message.type === "tab-group-open") {
+    openConfiguredTabGroup(message.provider, message.sourceId).then((result) => respond({ ok: true, result })).catch((error) => respond({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message.type === "tab-group-close") {
+    closeTabGroup({ provider: message.provider, sourceId: message.sourceId }).then((result) => respond({ ok: true, result })).catch((error) => respond({ ok: false, error: error.message }));
     return true;
   }
 });

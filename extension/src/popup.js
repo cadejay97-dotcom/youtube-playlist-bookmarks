@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS } from "./default-playlists.js";
 
 const $ = (selector) => document.querySelector(selector);
+let tabGroupCatalog = { youtube: [], github: [], openGroups: { youtube: [], github: [] } };
 
 function dateText(value) {
   return value ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "Never";
@@ -20,6 +21,47 @@ function resultText(result, timestamp, itemName, attempt) {
   return `${dateText(timestamp)} - ${result.ok.length} ${itemName}, ${result.created} added, ${result.updated} updated, ${result.removed} removed`;
 }
 
+function renderGroupRows(provider, items) {
+  const openIds = new Set((tabGroupCatalog.openGroups?.[provider] || []).map((group) => group.sourceId));
+  return items.length ? items.map((item) => {
+    const open = openIds.has(item.id);
+    const row = document.createElement("div");
+    row.className = "group-row";
+    const label = document.createElement("span");
+    label.textContent = `${item.title} (${item.count})`;
+    row.append(label);
+    const button = document.createElement("button");
+    button.className = open ? "secondary group-toggle open" : "secondary group-toggle";
+    button.dataset.provider = provider;
+    button.dataset.sourceId = item.id;
+    button.textContent = open ? "Close group" : "Open group";
+    button.title = open ? `Close ${item.title}` : `Open ${item.title} in a tab group`;
+    row.append(button);
+    if (item.error) {
+      const error = document.createElement("small");
+      error.textContent = item.error;
+      row.append(error);
+    }
+    return row;
+  }) : [Object.assign(document.createElement("p"), { className: "empty-group", textContent: "No lists available." })];
+}
+
+function renderTabGroups() {
+  $("#youtube-groups").replaceChildren(...renderGroupRows("youtube", tabGroupCatalog.youtube));
+  $("#github-groups").replaceChildren(...renderGroupRows("github", tabGroupCatalog.github));
+  const openCount = (tabGroupCatalog.openGroups?.youtube || []).length + (tabGroupCatalog.openGroups?.github || []).length;
+  $("#tab-group-count").textContent = `${openCount} open`;
+  if (tabGroupCatalog.githubError) $("#tab-group-feedback").textContent = `GitHub Lists could not load: ${tabGroupCatalog.githubError}`;
+  else $("#tab-group-feedback").textContent = "Open groups refresh with the extension's automatic checks.";
+}
+
+async function loadTabGroupCatalog() {
+  const response = await chrome.runtime.sendMessage({ type: "tab-groups-catalog" });
+  if (!response?.ok) throw new Error(response?.error || "Tab group lists did not respond.");
+  tabGroupCatalog = response.catalog;
+  renderTabGroups();
+}
+
 async function render() {
   const settings = { ...DEFAULT_SETTINGS, ...(await chrome.storage.local.get(DEFAULT_SETTINGS)) };
   $("#youtube-destination").textContent = await folderTitle(settings.rootFolderId);
@@ -36,6 +78,7 @@ async function render() {
   const githubButton = $("#github-sync");
   githubButton.textContent = settings.githubToken && settings.githubRootFolderId ? "Sync GitHub Lists" : "Connect GitHub";
   $("#interval-note").textContent = `Automatic checks run every ${settings.syncIntervalMinutes} minute${settings.syncIntervalMinutes === 1 ? "" : "s"} while Chrome is open.`;
+  await loadTabGroupCatalog();
 }
 
 $("#settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
@@ -67,7 +110,33 @@ $("#github-sync").addEventListener("click", async () => {
     button.disabled = false; button.textContent = "Sync GitHub Lists";
   }
 });
+
+$("#youtube-groups").addEventListener("click", handleGroupToggle);
+$("#github-groups").addEventListener("click", handleGroupToggle);
+
+async function handleGroupToggle(event) {
+  const button = event.target.closest("button[data-provider]");
+  if (!button) return;
+  const opening = !button.classList.contains("open");
+  button.disabled = true;
+  button.textContent = opening ? "Opening..." : "Closing...";
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: opening ? "tab-group-open" : "tab-group-close",
+      provider: button.dataset.provider,
+      sourceId: button.dataset.sourceId
+    });
+    if (!response?.ok) throw new Error(response?.error || "Tab group action did not respond.");
+    await render();
+  } catch (error) {
+    $("#tab-group-feedback").textContent = error.message;
+    button.disabled = false;
+    button.textContent = opening ? "Open group" : "Close group";
+  }
+}
+
 render().catch((error) => {
   $("#youtube-status").textContent = `Extension state could not load: ${error.message}`;
   $("#github-status").textContent = `Extension state could not load: ${error.message}`;
+  $("#tab-group-feedback").textContent = `Tab groups could not load: ${error.message}`;
 });

@@ -36,12 +36,22 @@ async function validGitHubToken(settings) {
   return credentials.accessToken;
 }
 
+export async function fetchConfiguredGitHubLists(settings = null) {
+  settings ||= await getSettings();
+  const source = await fetchGitHubLists(await validGitHubToken(settings));
+  return {
+    ...source,
+    allLists: source.lists,
+    lists: settings.githubIncludePrivateLists ? source.lists : source.lists.filter((list) => !list.isPrivate)
+  };
+}
+
 export async function syncGitHubLists() {
   const settings = await getSettings();
   if (!settings.githubRootFolderId) throw new Error("Choose a GitHub project destination folder in Settings before syncing.");
-  const source = await fetchGitHubLists(await validGitHubToken(settings));
-  const lists = settings.githubIncludePrivateLists ? source.lists : source.lists.filter((list) => !list.isPrivate);
-  const result = { ok: [], failed: [], created: 0, updated: 0, removed: 0, skippedPrivate: source.lists.length - lists.length, at: new Date().toISOString() };
+  const source = await fetchConfiguredGitHubLists(settings);
+  const lists = source.lists;
+  const result = { ok: [], failed: [], created: 0, updated: 0, removed: 0, skippedPrivate: source.allLists.length - lists.length, at: new Date().toISOString() };
   const nextFolders = { ...settings.githubListFolderIds };
   const nextManaged = { ...settings.githubManagedBookmarks };
   const containerFolderId = await ensureFolder(

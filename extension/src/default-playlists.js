@@ -32,7 +32,7 @@ export const DEFAULT_PLAYLISTS = [
 ];
 
 export const DEFAULT_SETTINGS = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   rootFolderId: null,
   playlists: DEFAULT_PLAYLISTS,
   playlistContainerName: "播放清单",
@@ -57,5 +57,7 @@ export const DEFAULT_SETTINGS = {
   githubManagedBookmarks: {},
   githubLastSync: null,
   githubLastResult: null,
-  githubLastAttempt: null
+  githubLastAttempt: null,
+  openTabGroups: { youtube: {}, github: {} },
+  tabGroupLastUpdate: null
 };

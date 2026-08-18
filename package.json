@@ -1,7 +1,7 @@
 {
   "name": "youtube-playlist-bookmarks",
-  "version": "1.1.1",
-  "description": "Mirror YouTube playlists and GitHub Lists into organized Chrome bookmark folders.",
+  "version": "1.2.0",
+  "description": "Mirror YouTube playlists and GitHub Lists into organized bookmarks or live Chrome tab groups.",
   "private": true,
   "license": "MIT",
   "repository": {

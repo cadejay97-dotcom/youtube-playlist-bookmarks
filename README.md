@@ -53,6 +53,18 @@ The authorization asks GitHub for the read-only `read:user` scope used to identi
 
 Private GitHub Lists are excluded by default. Enabling **Include private GitHub Lists** copies their names and repository links into ordinary Chrome bookmarks, which Chrome Sync may copy to your other signed-in devices. **Forget on this device** deletes local credentials without removing synchronized bookmarks or revoking the OAuth grant; use GitHub's Authorized OAuth Apps settings to revoke the grant itself.
 
+## Tab Groups
+
+The popup also exposes the currently readable YouTube playlists and GitHub Lists under **Open as tab groups**. Each row shows the number of current items:
+
+1. Click **Open group** for a playlist or List.
+2. The extension opens each video or repository URL in a new Chrome tab group named after that list.
+3. Click **Close group** on the same row to close that group's tabs and clear its saved selection.
+
+Open groups are stored separately from bookmark state. During the existing automatic sync interval, the extension rereads every open playlist/List and converges only the tabs it created: new items are opened, changed URLs are updated, and removed items are closed. Manually opened tabs are not removed during refresh, but closing a selected group closes all tabs currently inside that Chrome group. If a source cannot be read temporarily, the current tabs remain open and the next scheduled check retries.
+
+Opening a large playlist or List can create many tabs. Chrome may ask you to allow the extension's `tabGroups` permission when the updated unpacked extension is reloaded.
+
 ## Configure With An Agent
 
 When a user gives this repository to an agent, the agent should:
@@ -63,6 +75,7 @@ When a user gives this repository to an agent, the agent should:
 4. For GitHub, ask for the destination folder and confirm that the user wants to connect their GitHub account. Never request a GitHub password, personal access token, OAuth client ID, or OAuth client secret.
 5. Guide the user through loading `extension` at `chrome://extensions`. Chrome may restrict agents from operating that internal page, so let the user click there when required.
 6. Save the independent settings, run the first sync for each selected source, and verify the corresponding container and child folders in the bookmark bar.
+7. From the popup, open one configured playlist or GitHub List as a tab group, verify its tabs and title, then close it from the same row.
 
 ## Development
 
@@ -79,7 +92,7 @@ npm run package
 1. Create a developer account in the [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole/).
 2. Upload `outputs/youtube-playlist-bookmarks.zip`.
 3. Add screenshots and a public link to [PRIVACY.md](PRIVACY.md).
-4. Explain host permissions: YouTube pages are read to mirror configured playlists; GitHub and GitHub API are used only after the user chooses to connect GitHub Lists.
+4. Explain host permissions: YouTube pages are read to mirror configured playlists; GitHub and GitHub API are used only after the user chooses to connect GitHub Lists. The `tabGroups` permission lets the extension create, update, and close the groups it manages.
 
 ## License
 
