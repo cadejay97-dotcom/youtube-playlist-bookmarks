@@ -4,6 +4,7 @@ A Manifest V3 Chrome extension that mirrors two independent sources into Chrome 
 
 - **YouTube playlists**: destination folder -> `播放清单` -> playlist -> video bookmarks.
 - **GitHub Lists**: destination folder -> `项目清单` -> GitHub List -> repository bookmarks.
+- **Live Chrome tab groups**: choose any readable YouTube playlist or GitHub List in the popup -> a named tab group containing its current items; YouTube opens inactive with autoplay disabled.
 
 The two sources have different settings, destination folders, connection states, sync results, and managed-bookmark records. Configuring or syncing one never changes the other.
 
